@@ -2,11 +2,11 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getCachedFileUri } from '~/utils/google-file-manager';
 import {
   MATH_FORMATTING,
-  CONCISE,
+  TONE,
+  SYSTEM_RULES,
   DIRECT_MODE,
   HINT_MODE,
   NO_DIAGRAMS,
-  SYSTEM_CTX,
 } from '~/utils/prompts';
 import { chatMessageSchema, examIdSchema } from './chat.schemas';
 import { bodyLimit } from 'hono/body-limit';
@@ -106,8 +106,8 @@ chat.post(
 
     const shouldGiveDirectAnswer = giveDirectAnswer ?? true;
     const systemPrompt = [
-      SYSTEM_CTX,
-      CONCISE,
+      SYSTEM_RULES,
+      TONE,
       MATH_FORMATTING,
       NO_DIAGRAMS,
       shouldGiveDirectAnswer ? DIRECT_MODE : HINT_MODE,
