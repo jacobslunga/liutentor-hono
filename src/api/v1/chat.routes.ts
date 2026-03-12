@@ -23,12 +23,12 @@ const genAI = new GoogleGenerativeAI(
 
 const getGoogleModel = (modelId: string) => {
   const map: Record<string, string> = {
-    'gemini-2.5-flash': 'gemini-2.5-flash',
     'gemini-2.5-pro': 'gemini-2.5-pro',
-    'gemini-3-pro': 'gemini-3-pro-preview',
+    'gemini-3.1-pro': 'gemini-3.1-pro-preview',
+    'gemini-3.1-flash-lite': 'gemini-3.1-flash-lite-preview',
   };
   return genAI.getGenerativeModel({
-    model: map[modelId] || 'gemini-2.0-flash',
+    model: map[modelId] || 'gemini-2.5-pro',
   });
 };
 
@@ -69,7 +69,7 @@ chat.post(
       examUrl,
       solutionUrl,
       courseCode,
-      modelId = 'gemini-2.5-flash',
+      modelId = 'gemini-3-pro',
     } = body as any;
 
     console.log(`
