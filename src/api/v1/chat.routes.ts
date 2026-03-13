@@ -1,13 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getCachedFileUri } from '~/utils/google-file-manager';
-import {
-  MATH_FORMATTING,
-  TONE,
-  SYSTEM_RULES,
-  DIRECT_MODE,
-  HINT_MODE,
-  NO_DIAGRAMS,
-} from '~/utils/prompts';
+import { HINT_MODE, SYSTEM_PROMPT } from '~/utils/prompts';
 import { chatMessageSchema, examIdSchema } from './chat.schemas';
 import { bodyLimit } from 'hono/body-limit';
 import { timeout } from 'hono/timeout';
@@ -32,15 +25,6 @@ const getGoogleModel = (modelId: string) => {
   });
 };
 
-function logMemory(tag: string) {
-  const m = process.memoryUsage();
-  console.log(
-    `[MEM ${tag.padEnd(15)}] RSS: ${Math.round(
-      m.rss / 1024 / 1024,
-    )}MB | Heap: ${Math.round(m.heapUsed / 1024 / 1024)}MB`,
-  );
-}
-
 function logToDBAsync(payload: any) {
   supabase
     .from('ai_chat_logs')
@@ -59,8 +43,6 @@ chat.post(
   bodyLimit({ maxSize: 2 * 1024 * 1024 }),
   timeout(120000),
   async (c) => {
-    logMemory('REQUEST_START');
-
     const { examId } = c.req.param();
     const body = c.req.valid('json');
     const {
@@ -106,14 +88,9 @@ chat.post(
 
     const shouldGiveDirectAnswer = giveDirectAnswer ?? true;
     const systemPrompt = [
-      SYSTEM_RULES,
-      TONE,
-      MATH_FORMATTING,
-      NO_DIAGRAMS,
-      shouldGiveDirectAnswer ? DIRECT_MODE : HINT_MODE,
+      SYSTEM_PROMPT,
+      !shouldGiveDirectAnswer ? HINT_MODE : '',
     ].join('\n');
-
-    logMemory('BEFORE_AI_STREAM');
 
     const model = getGoogleModel(modelId);
 
@@ -163,7 +140,6 @@ chat.post(
         await s.write(text);
       }
 
-      logMemory('AFTER_AI_STREAM');
       logToDBAsync({
         anonymous_user_id: c.req.header('x-anonymous-user-id') || 'unknown',
         course_code: courseCode,

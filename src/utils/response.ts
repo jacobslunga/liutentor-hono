@@ -1,6 +1,6 @@
-import type { ApiResponse } from "../../types/api";
+import type { ApiResponse } from '../../types/api';
 
-export function success<T>(payload: T, message = "OK"): ApiResponse<T> {
+export function success<T>(payload: T, message = 'OK'): ApiResponse<T> {
   return {
     success: true,
     message,
