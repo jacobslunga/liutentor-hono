@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI, createPartFromUri } from '@google/genai';
 import { getCachedFileUri } from '~/utils/google-file-manager';
 import { HINT_MODE, SYSTEM_PROMPT } from '~/utils/prompts';
 import { chatMessageSchema, examIdSchema } from './chat.schemas';
@@ -10,19 +10,18 @@ import { HTTPException } from 'hono/http-exception';
 import { stream } from 'hono/streaming';
 import { supabase } from '~/db/supabase';
 
-const genAI = new GoogleGenerativeAI(
-  process.env.GOOGLE_GENERATIVE_AI_API_KEY || '',
-);
+const ai = new GoogleGenAI({
+  apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY || '',
+});
 
-const getGoogleModel = (modelId: string) => {
+const getGoogleModelId = (modelId: string) => {
   const map: Record<string, string> = {
     'gemini-2.5-pro': 'gemini-2.5-pro',
     'gemini-3.1-pro': 'gemini-3.1-pro-preview',
     'gemini-3.1-flash-lite': 'gemini-3.1-flash-lite-preview',
   };
-  return genAI.getGenerativeModel({
-    model: map[modelId] || 'gemini-2.5-pro',
-  });
+
+  return map[modelId] || 'gemini-2.5-pro';
 };
 
 function logToDBAsync(payload: any) {
@@ -34,6 +33,40 @@ function logToDBAsync(payload: any) {
     });
 }
 
+function extractTextContent(content: unknown): string {
+  if (Array.isArray(content)) {
+    const textPart = content.find(
+      (part: any) => part?.type === 'text' && typeof part?.text === 'string',
+    );
+    return textPart?.text || '';
+  }
+
+  return typeof content === 'string' ? content : '';
+}
+
+function mapHistoryMessage(message: any) {
+  const role = message?.role === 'assistant' ? 'model' : 'user';
+
+  if (Array.isArray(message?.content)) {
+    return {
+      role,
+      parts: message.content
+        .filter(
+          (part: any) =>
+            part?.type === 'text' && typeof part?.text === 'string',
+        )
+        .map((part: any) => ({ text: part.text })),
+    };
+  }
+
+  return {
+    role,
+    parts: [
+      { text: typeof message?.content === 'string' ? message.content : '' },
+    ],
+  };
+}
+
 const chat = new Hono().basePath('/v1/chat');
 
 chat.post(
@@ -43,15 +76,16 @@ chat.post(
   bodyLimit({ maxSize: 2 * 1024 * 1024 }),
   timeout(120000),
   async (c) => {
-    const { examId } = c.req.param();
+    const { examId } = c.req.valid('param');
     const body = c.req.valid('json');
+
     const {
       messages,
       giveDirectAnswer = true,
       examUrl,
       solutionUrl,
       courseCode,
-      modelId = 'gemini-3-pro',
+      modelId = 'gemini-2.5-pro',
     } = body as any;
 
     console.log(`
@@ -61,28 +95,30 @@ chat.post(
 │ PDF:      ${examUrl}
 └──────────────────────────────────────┘`);
 
-    if (!examUrl || !messages?.length) throw new HTTPException(400);
+    if (!examUrl || !messages?.length) {
+      throw new HTTPException(400, {
+        message: 'Missing examUrl or messages',
+      });
+    }
 
     const last = messages[messages.length - 1];
-    if (last?.role === 'user') {
-      const text = Array.isArray(last.content)
-        ? last.content.find((p: any) => p.type === 'text')?.text || ''
-        : last.content;
+    const lastMsgText = extractTextContent(last?.content);
 
+    if (last?.role === 'user') {
       logToDBAsync({
         anonymous_user_id: c.req.header('x-anonymous-user-id') || 'unknown',
         course_code: courseCode,
         exam_id: examId,
         role: 'user',
-        content: text,
+        content: lastMsgText,
         model: modelId,
       });
     }
 
     const [finalExamUri, finalSolutionUri] = await Promise.all([
-      getCachedFileUri('exam', examId as string, examUrl),
+      getCachedFileUri('exam', String(examId), examUrl),
       solutionUrl
-        ? getCachedFileUri('solution', examId as string, solutionUrl)
+        ? getCachedFileUri('solution', String(examId), solutionUrl)
         : Promise.resolve(null),
     ]);
 
@@ -90,43 +126,50 @@ chat.post(
     const systemPrompt = [
       SYSTEM_PROMPT,
       !shouldGiveDirectAnswer ? HINT_MODE : '',
-    ].join('\n');
+    ]
+      .filter(Boolean)
+      .join('\n');
 
-    const model = getGoogleModel(modelId);
+    const model = getGoogleModelId(modelId);
 
-    const history = messages.slice(0, -1).map((m: any) => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: Array.isArray(m.content)
-        ? m.content.map((c: any) =>
-            c.type === 'text' ? { text: c.text } : { text: '' },
-          )
-        : [{ text: m.content }],
-    }));
-
-    const lastMsgContent = last?.content;
-    const lastMsgText = Array.isArray(lastMsgContent)
-      ? lastMsgContent.find((c: any) => c.type === 'text')?.text || ''
-      : lastMsgContent;
+    const history = messages
+      .slice(0, -1)
+      .map(mapHistoryMessage)
+      .filter((msg: any) => Array.isArray(msg.parts) && msg.parts.length > 0);
 
     const currentParts: any[] = [];
 
     if (finalExamUri) {
-      currentParts.push({
-        fileData: { mimeType: 'application/pdf', fileUri: finalExamUri },
-      });
+      currentParts.push(createPartFromUri(finalExamUri, 'application/pdf'));
     }
+
     if (finalSolutionUri) {
-      currentParts.push({
-        fileData: { mimeType: 'application/pdf', fileUri: finalSolutionUri },
-      });
+      currentParts.push(createPartFromUri(finalSolutionUri, 'application/pdf'));
     }
 
     currentParts.push({ text: lastMsgText });
 
-    const result = await model.generateContentStream({
-      contents: [...history, { role: 'user', parts: currentParts }],
-      systemInstruction: systemPrompt,
-    });
+    let result;
+    try {
+      result = await ai.models.generateContentStream({
+        model,
+        contents: [
+          ...history,
+          {
+            role: 'user',
+            parts: currentParts,
+          },
+        ],
+        config: {
+          systemInstruction: systemPrompt,
+        },
+      });
+    } catch (error: any) {
+      console.error('Gemini stream error:', error);
+      throw new HTTPException(500, {
+        message: 'Failed to generate response',
+      });
+    }
 
     return stream(c, async (s) => {
       c.header('Content-Type', 'text/plain; charset=utf-8');
@@ -134,10 +177,19 @@ chat.post(
 
       let fullResponse = '';
 
-      for await (const chunk of result.stream) {
-        const text = chunk.text();
-        fullResponse += text;
-        await s.write(text);
+      try {
+        for await (const chunk of result) {
+          const text = chunk.text || '';
+          if (!text) continue;
+
+          fullResponse += text;
+          await s.write(text);
+        }
+      } catch (error: any) {
+        console.error('Streaming error:', error);
+        throw new HTTPException(500, {
+          message: 'Failed while streaming response',
+        });
       }
 
       logToDBAsync({
@@ -146,7 +198,7 @@ chat.post(
         exam_id: examId,
         role: 'assistant',
         content: fullResponse,
-        model: modelId,
+        model,
       });
     });
   },
