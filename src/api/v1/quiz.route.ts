@@ -3,14 +3,9 @@ import { zValidator } from '@hono/zod-validator';
 import { HTTPException } from 'hono/http-exception';
 import { bodyLimit } from 'hono/body-limit';
 import { timeout } from 'hono/timeout';
-import {
-  GoogleGenAI,
-  createPartFromUri,
-  createUserContent,
-} from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 
 import { supabase } from '~/db/supabase';
-import { getCachedFileUri } from '~/utils/google-file-manager';
 import { success } from '~/utils/response';
 import {
   courseCodeSchema,
@@ -33,6 +28,21 @@ function shuffleArray<T>(items: T[]): T[] {
     [copy[i], copy[j]] = [copy[j], copy[i]];
   }
   return copy;
+}
+
+async function fetchPdfAsBase64(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      console.error(`Failed to fetch PDF at ${url}: ${response.statusText}`);
+      return null;
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer).toString('base64');
+  } catch (error) {
+    console.error(`Network error fetching PDF at ${url}:`, error);
+    return null;
+  }
 }
 
 async function getRandomExamSources(courseCode: string) {
@@ -118,30 +128,36 @@ quiz.post(
 
     const sourceExams = await getRandomExamSources(courseCode);
 
-    const examUris = await Promise.all(
+    const examsWithBase64 = await Promise.all(
       sourceExams.map(async (exam) => {
-        const fileUri = await getCachedFileUri(
-          'exam',
-          String(exam.id),
-          exam.pdf_url,
-        );
+        const base64Data = await fetchPdfAsBase64(exam.pdf_url);
         return {
           id: exam.id,
           exam_name: exam.exam_name,
           exam_date: exam.exam_date,
           university: exam.university,
-          fileUri,
+          base64Data,
         };
       }),
     );
 
-    const pdfParts = examUris.map((exam) =>
-      createPartFromUri(exam.fileUri, 'application/pdf'),
+    const validExams = examsWithBase64.filter(
+      (exam) => exam.base64Data !== null,
     );
+
+    if (validExams.length === 0) {
+      throw new HTTPException(500, {
+        message: 'Failed to download PDF sources for this quiz.',
+      });
+    }
+
+    const pdfParts = validExams.map((exam) => ({
+      inlineData: { data: exam.base64Data!, mimeType: 'application/pdf' },
+    }));
 
     let parsed: MultipleChoiceQuiz;
 
-    const prompt = `
+    const promptText = `
 ${QUIZ_MULTIPLE_CHOICE_PROMPT}
 
 Kurskod: ${courseCode}
@@ -149,8 +165,13 @@ Kurskod: ${courseCode}
 
     try {
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-pro',
-        contents: [createUserContent([...pdfParts, prompt])],
+        model: 'gemini-2.5-flash',
+        contents: [
+          {
+            role: 'user',
+            parts: [...pdfParts, { text: promptText }],
+          },
+        ],
         config: {
           responseMimeType: 'application/json',
           responseSchema: multipleChoiceResponseSchema,
@@ -172,7 +193,7 @@ Kurskod: ${courseCode}
       });
     }
 
-    const sourceExamIds = examUris.map((x) => x.id);
+    const sourceExamIds = validExams.map((x) => x.id);
 
     insertQuizIfNotDuplicate({
       anonymous_user_id: anonymousUserId,
@@ -180,8 +201,8 @@ Kurskod: ${courseCode}
       quiz_type: 'multiple_choice',
       quiz: parsed,
       source_exam_ids: sourceExamIds,
-      source_count: examUris.length,
-      model: 'gemini-2.5-pro',
+      source_count: validExams.length,
+      model: 'gemini-2.5-flash',
     });
 
     const resultPayload = {
@@ -189,7 +210,7 @@ Kurskod: ${courseCode}
       meta: {
         courseCode,
         sourceExamIds,
-        sourceCount: examUris.length,
+        sourceCount: validExams.length,
       },
     };
 
