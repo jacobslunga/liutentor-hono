@@ -1,5 +1,4 @@
-import { GoogleGenAI, createPartFromUri } from '@google/genai';
-import { getCachedFileUri } from '~/utils/google-file-manager';
+import { GoogleGenAI } from '@google/genai';
 import { HINT_MODE, SYSTEM_PROMPT } from '~/utils/prompts';
 import { chatMessageSchema, examIdSchema } from './chat.schemas';
 import { bodyLimit } from 'hono/body-limit';
@@ -20,7 +19,6 @@ const getGoogleModelId = (modelId: string) => {
     'gemini-3.1-pro': 'gemini-3.1-pro-preview',
     'gemini-3.1-flash-lite': 'gemini-3.1-flash-lite-preview',
   };
-
   return map[modelId] || 'gemini-2.5-pro';
 };
 
@@ -40,7 +38,6 @@ function extractTextContent(content: unknown): string {
     );
     return textPart?.text || '';
   }
-
   return typeof content === 'string' ? content : '';
 }
 
@@ -67,13 +64,29 @@ function mapHistoryMessage(message: any) {
   };
 }
 
+// NEW HELPER: Fetch PDF from Supabase and convert to Base64
+async function fetchPdfAsBase64(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      console.error(`Failed to fetch PDF at ${url}: ${response.statusText}`);
+      return null;
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer).toString('base64');
+  } catch (error) {
+    console.error(`Network error fetching PDF at ${url}:`, error);
+    return null;
+  }
+}
+
 const chat = new Hono().basePath('/v1/chat');
 
 chat.post(
   '/completion/:examId',
   zValidator('param', examIdSchema),
   zValidator('json', chatMessageSchema),
-  bodyLimit({ maxSize: 2 * 1024 * 1024 }),
+  bodyLimit({ maxSize: 20 * 1024 * 1024 }), // Increased slightly to handle base64 overhead
   timeout(120000),
   async (c) => {
     const { examId } = c.req.valid('param');
@@ -115,11 +128,10 @@ chat.post(
       });
     }
 
-    const [finalExamUri, finalSolutionUri] = await Promise.all([
-      getCachedFileUri('exam', String(examId), examUrl),
-      solutionUrl
-        ? getCachedFileUri('solution', String(examId), solutionUrl)
-        : Promise.resolve(null),
+    // Fetch PDFs concurrently and convert them directly to base64
+    const [examBase64, solutionBase64] = await Promise.all([
+      fetchPdfAsBase64(examUrl),
+      solutionUrl ? fetchPdfAsBase64(solutionUrl) : Promise.resolve(null),
     ]);
 
     const shouldGiveDirectAnswer = giveDirectAnswer ?? true;
@@ -137,27 +149,30 @@ chat.post(
       .map(mapHistoryMessage)
       .filter((msg: any) => Array.isArray(msg.parts) && msg.parts.length > 0);
 
-    const currentParts: any[] = [];
-
-    if (finalExamUri) {
-      currentParts.push(createPartFromUri(finalExamUri, 'application/pdf'));
+    // Build the PDF parts using inlineData instead of URIs
+    const pdfParts: any[] = [];
+    if (examBase64) {
+      pdfParts.push({
+        inlineData: { data: examBase64, mimeType: 'application/pdf' },
+      });
     }
-
-    if (finalSolutionUri) {
-      currentParts.push(createPartFromUri(finalSolutionUri, 'application/pdf'));
+    if (solutionBase64) {
+      pdfParts.push({
+        inlineData: { data: solutionBase64, mimeType: 'application/pdf' },
+      });
     }
-
-    currentParts.push({ text: lastMsgText });
 
     let result;
     try {
       result = await ai.models.generateContentStream({
         model,
         contents: [
+          // INJECT PDFs AT THE VERY BEGINNING OF THE HISTORY
+          ...(pdfParts.length > 0 ? [{ role: 'user', parts: pdfParts }] : []),
           ...history,
           {
             role: 'user',
-            parts: currentParts,
+            parts: [{ text: lastMsgText }],
           },
         ],
         config: {
