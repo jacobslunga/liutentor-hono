@@ -13,7 +13,7 @@ export const multipleChoiceQuestionSchema = z.object({
 
 export const multipleChoiceQuizSchema = z.object({
   quiz: z.object({
-    questions: z.array(multipleChoiceQuestionSchema).min(10),
+    questions: z.array(multipleChoiceQuestionSchema).min(10).max(20),
   }),
 });
 
