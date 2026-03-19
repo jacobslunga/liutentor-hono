@@ -7,14 +7,10 @@
     "build": "bun build src/app.ts --outdir dist --target bun"
   },
   "dependencies": {
-    "@ai-sdk/google": "^3.0.20",
-    "@ai-sdk/openai": "^3.0.25",
     "@google/genai": "^1.45.0",
     "@google/generative-ai": "^0.24.1",
     "@hono/zod-validator": "^0.7.6",
     "@supabase/supabase-js": "^2.93.3",
-    "@upstash/ratelimit": "^2.0.8",
-    "@upstash/redis": "^1.36.1",
     "ai": "^6.0.67",
     "crypto": "^1.0.1",
     "hono": "^4.11.7",
