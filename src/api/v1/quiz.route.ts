@@ -13,6 +13,7 @@ import {
 } from "./quiz.schemas";
 import { QUIZ_MULTIPLE_CHOICE_PROMPT } from "~/utils/prompts";
 import { insertQuizIfNotDuplicate } from "./quiz.cache";
+import { rebalanceQuizAnswerDistribution } from "./quiz.utils";
 
 const quiz = new Hono().basePath("/v1/quiz");
 
@@ -238,6 +239,9 @@ Kurskod: ${courseCode}
         }));
 
         const parsed = await generateQuizFromAnthropic(pdfs, promptText);
+        const normalizedQuiz = multipleChoiceQuizSchema.parse(
+          rebalanceQuizAnswerDistribution(parsed),
+        );
 
         await sendEvent("status", {
           step: "finalizing",
@@ -250,14 +254,14 @@ Kurskod: ${courseCode}
           anonymous_user_id: anonymousUserId,
           course_code: courseCode,
           quiz_type: "multiple_choice",
-          quiz: parsed,
+          quiz: normalizedQuiz,
           source_exam_ids: sourceExamIds,
           source_count: validExams.length,
           model: ANTHROPIC_MODEL,
         });
 
         const resultPayload = {
-          ...parsed,
+          ...normalizedQuiz,
           meta: {
             courseCode,
             sourceExamIds,
