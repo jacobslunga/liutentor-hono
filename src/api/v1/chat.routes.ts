@@ -28,7 +28,7 @@ const MODEL_MAP: Record<string, ModelConfig> = {
     provider: "anthropic",
     modelId: "claude-haiku-4-5-20251001",
   },
-  "claude-sonnet": { provider: "anthropic", modelId: "claude-haiku-4-5-20251001" },
+  "claude-sonnet": { provider: "anthropic", modelId: "claude-sonnet-4-6" },
 };
 
 const getModelConfig = (modelId: string): ModelConfig =>
