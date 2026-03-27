@@ -1,17 +1,16 @@
-import { Hono } from 'hono';
-import { HTTPException } from 'hono/http-exception';
-import { cors } from 'hono/cors';
-import { supabaseMiddleware } from '~/db/supabase';
-import exams from '~/api/v1/exams.routes';
-import chat from '~/api/v1/chat.routes';
-import quiz from '~/api/v1/quiz.route';
-import { fail } from '~/utils/response';
+import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
+import { cors } from "hono/cors";
+import { supabaseMiddleware } from "~/db/supabase";
+import chat from "~/api/v1/chat.routes";
+import quiz from "~/api/v1/quiz.route";
+import { fail } from "~/utils/response";
 
-const app = new Hono().basePath('/api');
+const app = new Hono().basePath("/api");
 
 app.use(
   cors({
-    origin: ['http://localhost:5173', 'https://liutentor.se'],
+    origin: ["http://localhost:5173", "https://liutentor.se"],
   }),
 );
 
@@ -22,14 +21,13 @@ app.onError((err, c) => {
 
   console.error(err);
 
-  return c.json(fail('Internal server error'), 500);
+  return c.json(fail("Internal server error"), 500);
 });
 
 app.use(supabaseMiddleware);
 
-app.route('/', exams);
-app.route('/', chat);
-app.route('/', quiz);
+app.route("/", chat);
+app.route("/", quiz);
 
 export default {
   port: process.env.PORT || 3000,
