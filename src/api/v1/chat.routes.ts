@@ -24,11 +24,6 @@ const MODEL_MAP: Record<string, ModelConfig> = {
   "gemini-2.5-pro": { provider: "google", modelId: "gemini-2.5-flash" },
   "gemini-3.1-pro-preview": { provider: "google", modelId: "gemini-2.5-pro" },
   "gemini-3.1-flash-lite": { provider: "google", modelId: "gemini-2.5-flash" },
-  "claude-haiku": {
-    provider: "anthropic",
-    modelId: "claude-haiku-4-5-20251001",
-  },
-  "claude-sonnet": { provider: "anthropic", modelId: "claude-sonnet-4-6" },
 };
 
 const getModelConfig = (modelId: string): ModelConfig =>
