@@ -4,6 +4,7 @@ import { HTTPException } from "hono/http-exception";
 import { bodyLimit } from "hono/body-limit";
 import { timeout } from "hono/timeout";
 import { stream } from "hono/streaming";
+import { GoogleGenAI } from "@google/genai";
 
 import { supabase } from "~/db/supabase";
 import {
@@ -17,9 +18,13 @@ import { rebalanceQuizAnswerDistribution } from "./quiz.utils";
 
 const quiz = new Hono().basePath("/v1/quiz");
 
-const ANTHROPIC_MODEL = "claude-haiku-4-5-20251001";
+const GOOGLE_MODEL = "gemini-2.5-flash";
 
-const ANTHROPIC_QUIZ_JSON_INSTRUCTION = `
+const googleAI = new GoogleGenAI({
+  apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY || "",
+});
+
+const QUIZ_JSON_INSTRUCTION = `
 Du MÅSTE svara med ENBART giltig JSON som matchar denna exakta struktur, ingen markdown, ingen inledning, ingen förklaring:
 {
   "quiz": {
@@ -97,55 +102,37 @@ async function getRandomExamSources(courseCode: string) {
   return shuffled.slice(0, takeCount);
 }
 
-async function generateQuizFromAnthropic(
+async function generateQuizFromGoogle(
   pdfs: { data: string; mimeType: string }[],
   promptText: string,
 ): Promise<MultipleChoiceQuiz> {
-  const pdfBlocks = pdfs.map((pdf) => ({
-    type: "document" as const,
-    source: {
-      type: "base64" as const,
-      media_type: pdf.mimeType,
+  const pdfParts = pdfs.map((pdf) => ({
+    inlineData: {
       data: pdf.data,
+      mimeType: pdf.mimeType,
     },
   }));
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY || "",
-      "anthropic-version": "2023-06-01",
+  const result = await googleAI.models.generateContent({
+    model: GOOGLE_MODEL,
+    contents: [
+      {
+        role: "user",
+        parts: [...pdfParts, { text: promptText }],
+      },
+    ],
+    config: {
+      systemInstruction: QUIZ_JSON_INSTRUCTION,
     },
-    body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
-      max_tokens: 8096,
-      system: ANTHROPIC_QUIZ_JSON_INSTRUCTION,
-      messages: [
-        {
-          role: "user",
-          content: [...pdfBlocks, { type: "text", text: promptText }],
-        },
-      ],
-    }),
   });
 
-  if (!response.ok) {
-    const errorBody = await response.text();
-    console.error("Anthropic API error:", response.status, errorBody);
-    throw new Error(`Anthropic API error: ${response.statusText}`);
+  const text = result.text ?? "";
+
+  if (!text) {
+    throw new Error("Gemini returned empty response");
   }
 
-  const result = await response.json();
-  const textContent = result.content?.find(
-    (block: any) => block.type === "text",
-  );
-
-  if (!textContent?.text) {
-    throw new Error("Anthropic returned empty response");
-  }
-
-  const cleaned = textContent.text
+  const cleaned = text
     .replace(/```json\s*/g, "")
     .replace(/```\s*/g, "")
     .trim();
@@ -162,13 +149,15 @@ quiz.post(
     const { courseCode } = c.req.valid("param");
     const anonymousUserId = c.req.header("x-anonymous-user-id") || "unknown";
 
-    if (!process.env.ANTHROPIC_API_KEY) {
-      throw new HTTPException(500, { message: "Missing ANTHROPIC_API_KEY" });
+    if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+      throw new HTTPException(500, {
+        message: "Missing GOOGLE_GENERATIVE_AI_API_KEY",
+      });
     }
 
     console.log(`
 ┌─ QUIZ REQUEST: ${courseCode} ──────┐
-│ Model: ${ANTHROPIC_MODEL}
+│ Model: ${GOOGLE_MODEL}
 └──────────────────────────────────────┘`);
 
     return stream(c, async (s) => {
@@ -238,7 +227,7 @@ Kurskod: ${courseCode}
           mimeType: "application/pdf" as const,
         }));
 
-        const parsed = await generateQuizFromAnthropic(pdfs, promptText);
+        const parsed = await generateQuizFromGoogle(pdfs, promptText);
         const normalizedQuiz = multipleChoiceQuizSchema.parse(
           rebalanceQuizAnswerDistribution(parsed),
         );
@@ -257,7 +246,7 @@ Kurskod: ${courseCode}
           quiz: normalizedQuiz,
           source_exam_ids: sourceExamIds,
           source_count: validExams.length,
-          model: ANTHROPIC_MODEL,
+          model: GOOGLE_MODEL,
         });
 
         const resultPayload = {
@@ -266,7 +255,7 @@ Kurskod: ${courseCode}
             courseCode,
             sourceExamIds,
             sourceCount: validExams.length,
-            model: ANTHROPIC_MODEL,
+            model: GOOGLE_MODEL,
           },
         };
 
