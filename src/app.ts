@@ -10,7 +10,7 @@ const app = new Hono().basePath("/api");
 
 app.use(
   cors({
-    origin: ["http://localhost:5173", "https://liutentor.se"],
+    origin: ["http://localhost:5173", "http://localhost:3000", "https://liutentor.se"],
   }),
 );
 
