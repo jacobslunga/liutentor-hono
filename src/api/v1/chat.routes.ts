@@ -29,15 +29,6 @@ const MODEL_MAP: Record<string, ModelConfig> = {
 const getModelConfig = (modelId: string): ModelConfig =>
   MODEL_MAP[modelId] ?? { provider: "google", modelId: "gemini-2.5-pro" };
 
-function logToDBAsync(payload: any) {
-  supabase
-    .from("ai_chat_logs")
-    .insert(payload)
-    .then(({ error }) => {
-      if (error) console.error("DB Log Error:", error.message);
-    });
-}
-
 function extractTextContent(content: unknown): string {
   if (Array.isArray(content)) {
     const textPart = content.find(
@@ -217,23 +208,6 @@ chat.post(
       messages[messages.length - 1]?.content,
     );
 
-    console.log(`
-┌─ AI REQUEST: ${courseCode} ────────┐
-│ Exam ID:  ${examId}
-│ Provider: ${provider}
-│ Model:    ${resolvedModelId}
-│ PDF:      ${examUrl}
-└──────────────────────────────────────┘`);
-
-    logToDBAsync({
-      anonymous_user_id: c.req.header("x-anonymous-user-id") || "unknown",
-      course_code: courseCode,
-      exam_id: examId,
-      role: "user",
-      content: lastMsgText,
-      model: resolvedModelId,
-    });
-
     const [examBase64, solutionBase64] = await Promise.all([
       fetchPdfAsBase64(examUrl),
       solutionUrl ? fetchPdfAsBase64(solutionUrl) : Promise.resolve(null),
@@ -284,15 +258,6 @@ chat.post(
           message: "Failed while streaming response",
         });
       }
-
-      logToDBAsync({
-        anonymous_user_id: c.req.header("x-anonymous-user-id") || "unknown",
-        course_code: courseCode,
-        exam_id: examId,
-        role: "assistant",
-        content: fullResponse,
-        model: resolvedModelId,
-      });
     });
   },
 );

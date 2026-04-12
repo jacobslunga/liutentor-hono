@@ -13,7 +13,6 @@ import {
   type MultipleChoiceQuiz,
 } from "./quiz.schemas";
 import { QUIZ_MULTIPLE_CHOICE_PROMPT } from "~/utils/prompts";
-import { insertQuizIfNotDuplicate } from "./quiz.cache";
 import { rebalanceQuizAnswerDistribution } from "./quiz.utils";
 
 const quiz = new Hono().basePath("/v1/quiz");
@@ -155,11 +154,6 @@ quiz.post(
       });
     }
 
-    console.log(`
-┌─ QUIZ REQUEST: ${courseCode} ──────┐
-│ Model: ${GOOGLE_MODEL}
-└──────────────────────────────────────┘`);
-
     return stream(c, async (s) => {
       c.header("Content-Type", "text/event-stream");
       c.header("Cache-Control", "no-cache");
@@ -238,16 +232,6 @@ Kurskod: ${courseCode}
         });
 
         const sourceExamIds = validExams.map((x) => x.id);
-
-        insertQuizIfNotDuplicate({
-          anonymous_user_id: anonymousUserId,
-          course_code: courseCode,
-          quiz_type: "multiple_choice",
-          quiz: normalizedQuiz,
-          source_exam_ids: sourceExamIds,
-          source_count: validExams.length,
-          model: GOOGLE_MODEL,
-        });
 
         const resultPayload = {
           ...normalizedQuiz,
