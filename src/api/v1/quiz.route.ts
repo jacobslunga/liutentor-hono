@@ -5,6 +5,7 @@ import { bodyLimit } from "hono/body-limit";
 import { timeout } from "hono/timeout";
 import { stream } from "hono/streaming";
 import { GoogleGenAI } from "@google/genai";
+import { z } from "zod";
 
 import { supabase } from "~/db/supabase";
 import {
@@ -14,6 +15,7 @@ import {
 } from "./quiz.schemas";
 import { QUIZ_MULTIPLE_CHOICE_PROMPT } from "~/utils/prompts";
 import { rebalanceQuizAnswerDistribution } from "./quiz.utils";
+import { insertQuizIfNotDuplicate } from "./quiz.cache";
 
 const quiz = new Hono().basePath("/v1/quiz");
 
@@ -21,6 +23,19 @@ const GOOGLE_MODEL = "gemini-2.5-flash";
 
 const googleAI = new GoogleGenAI({
   apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY || "",
+});
+
+const multipleChoiceBodySchema = z.object({
+  examIds: z
+    .array(z.number().int().positive())
+    .min(1, "Select at least one exam")
+    .max(5, "Maximum 5 exams allowed")
+    .optional(),
+  customPrompt: z
+    .string()
+    .max(300, "Custom prompt must be 300 characters or less")
+    .trim()
+    .optional(),
 });
 
 const QUIZ_JSON_INSTRUCTION = `
@@ -71,7 +86,30 @@ async function fetchPdfAsBase64(url: string): Promise<string | null> {
   }
 }
 
-async function getRandomExamSources(courseCode: string) {
+async function getExamSources(courseCode: string, examIds?: number[]) {
+  if (examIds && examIds.length > 0) {
+    const { data, error } = await supabase
+      .from("exams")
+      .select("id, course_code, exam_name, exam_date, pdf_url, university")
+      .eq("course_code", courseCode)
+      .in("id", examIds)
+      .not("pdf_url", "is", null);
+
+    if (error) {
+      throw new HTTPException(500, {
+        message: `Failed to fetch exams: ${error.message}`,
+      });
+    }
+
+    if (!data || data.length === 0) {
+      throw new HTTPException(404, {
+        message: `No exams with PDF found for the provided exam IDs`,
+      });
+    }
+
+    return data;
+  }
+
   const { data, error } = await supabase
     .from("exams")
     .select("id, course_code, exam_name, exam_date, pdf_url, university")
@@ -142,10 +180,12 @@ async function generateQuizFromGoogle(
 quiz.post(
   "/multiple-choice/:courseCode",
   zValidator("param", courseCodeSchema),
+  zValidator("json", multipleChoiceBodySchema),
   bodyLimit({ maxSize: 256 * 1024 }),
   timeout(120000),
   async (c) => {
     const { courseCode } = c.req.valid("param");
+    const { examIds, customPrompt } = c.req.valid("json");
     const anonymousUserId = c.req.header("x-anonymous-user-id") || "unknown";
 
     if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
@@ -172,7 +212,7 @@ quiz.post(
           message: `Hämtar tentor för ${courseCode}`,
         });
 
-        const sourceExams = await getRandomExamSources(courseCode);
+        const sourceExams = await getExamSources(courseCode, examIds);
 
         await sendEvent("status", {
           step: "downloading_pdfs",
@@ -210,11 +250,16 @@ quiz.post(
           sources: validExams.length,
         });
 
-        const promptText = `
-${QUIZ_MULTIPLE_CHOICE_PROMPT}
+        const promptParts = [
+          QUIZ_MULTIPLE_CHOICE_PROMPT,
+          `Kurskod: ${courseCode}`,
+        ];
 
-Kurskod: ${courseCode}
-`.trim();
+        if (customPrompt) {
+          promptParts.push(`Användarens instruktioner: ${customPrompt}`);
+        }
+
+        const promptText = promptParts.join("\n\n").trim();
 
         const pdfs = validExams.map((exam) => ({
           data: exam.base64Data!,
@@ -232,6 +277,16 @@ Kurskod: ${courseCode}
         });
 
         const sourceExamIds = validExams.map((x) => x.id);
+
+        insertQuizIfNotDuplicate({
+          anonymous_user_id: anonymousUserId,
+          course_code: courseCode,
+          quiz_type: "multiple_choice",
+          quiz: normalizedQuiz,
+          source_exam_ids: sourceExamIds,
+          source_count: validExams.length,
+          model: GOOGLE_MODEL,
+        });
 
         const resultPayload = {
           ...normalizedQuiz,
