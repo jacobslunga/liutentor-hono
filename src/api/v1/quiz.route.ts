@@ -206,6 +206,20 @@ quiz.post(
         await s.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
       };
 
+      const cyan = "\x1b[36m";
+      const dim = "\x1b[2m";
+      const reset = "\x1b[0m";
+      const bold = "\x1b[1m";
+      console.log(
+        `${cyan}┌─ QUIZ REQUEST ${"─".repeat(35)}\n` +
+          `│${reset}  ${bold}Course${reset}   ${dim}→${reset}  ${courseCode}\n` +
+          `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${GOOGLE_MODEL}\n` +
+          `${cyan}│${reset}  ${bold}Exams${reset}    ${dim}→${reset}  ${examIds ? examIds.join(", ") : "random"}\n` +
+          `${cyan}│${reset}  ${bold}Custom${reset}   ${dim}→${reset}  ${customPrompt ? `"${customPrompt.slice(0, 40)}${customPrompt.length > 40 ? "…" : ""}"` : "none"}\n` +
+          `${cyan}│${reset}  ${bold}User${reset}     ${dim}→${reset}  ${dim}${anonymousUserId}${reset}\n` +
+          `${cyan}└${"─".repeat(50)}${reset}`,
+      );
+
       try {
         await sendEvent("status", {
           step: "fetching_exams",

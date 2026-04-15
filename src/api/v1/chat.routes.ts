@@ -221,6 +221,21 @@ chat.post(
       messages[messages.length - 1]?.content,
     );
 
+    const cyan = "\x1b[36m";
+    const dim = "\x1b[2m";
+    const reset = "\x1b[0m";
+    const bold = "\x1b[1m";
+    console.log(
+      `${cyan}┌─ CHAT REQUEST ${"─".repeat(35)}\n` +
+        `│${reset}  ${bold}Course${reset}   ${dim}→${reset}  ${courseCode ?? "unknown"}\n` +
+        `${cyan}│${reset}  ${bold}Exam ID${reset}  ${dim}→${reset}  ${examId}\n` +
+        `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${resolvedModelId}  ${dim}(${provider})${reset}\n` +
+        `${cyan}│${reset}  ${bold}Messages${reset} ${dim}→${reset}  ${messages.length}\n` +
+        `${cyan}│${reset}  ${bold}Solution${reset} ${dim}→${reset}  ${solutionUrl ? "yes" : "no"}\n` +
+        `${cyan}│${reset}  ${bold}User${reset}     ${dim}→${reset}  ${dim}${c.req.header("x-anonymous-user-id") ?? "unknown"}${reset}\n` +
+        `${cyan}└${"─".repeat(50)}${reset}`,
+    );
+
     logToDBAsync({
       anonymous_user_id: c.req.header("x-anonymous-user-id") || "unknown",
       course_code: courseCode,
