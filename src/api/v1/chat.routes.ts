@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import OpenAI from "openai";
 import { HINT_MODE, SYSTEM_PROMPT } from "~/utils/prompts";
 import { chatMessageSchema, examIdSchema } from "./chat.schemas";
 import { bodyLimit } from "hono/body-limit";
@@ -13,7 +14,11 @@ const googleAI = new GoogleGenAI({
   apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY || "",
 });
 
-type Provider = "google" | "anthropic";
+const openAI = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY || "",
+});
+
+type Provider = "google" | "anthropic" | "openai";
 
 interface ModelConfig {
   provider: Provider;
@@ -24,6 +29,7 @@ const MODEL_MAP: Record<string, ModelConfig> = {
   "gemini-2.5-pro": { provider: "google", modelId: "gemini-2.5-flash" },
   "gemini-3.1-pro-preview": { provider: "google", modelId: "gemini-2.5-pro" },
   "gemini-3.1-flash-lite": { provider: "google", modelId: "gemini-2.5-flash" },
+  "gpt-4o": { provider: "openai", modelId: "gpt-4o" },
 };
 
 const getModelConfig = (modelId: string): ModelConfig =>
@@ -193,6 +199,49 @@ async function* streamAnthropicResponse(
   }
 }
 
+async function* streamOpenAIResponse(
+  systemPrompt: string,
+  messages: any[],
+  modelId: string,
+  pdfs: PdfData[],
+  lastMsgText: string,
+): AsyncGenerator<string> {
+  const pdfContents = pdfs.map((pdf) => ({
+    type: "file" as const,
+    file: {
+      filename: "exam.pdf",
+      file_data: `data:application/pdf;base64,${pdf.data}`,
+    },
+  }));
+
+  const historyMessages = messages.slice(0, -1).map((msg: any) => ({
+    role: (msg.role === "assistant" ? "assistant" : "user") as
+      | "assistant"
+      | "user",
+    content: extractTextContent(msg.content),
+  }));
+
+  const lastMessage = {
+    role: "user" as const,
+    content: [...pdfContents, { type: "text" as const, text: lastMsgText }],
+  };
+
+  const result = await openAI.chat.completions.create({
+    model: modelId,
+    stream: true,
+    messages: [
+      { role: "system", content: systemPrompt },
+      ...historyMessages,
+      lastMessage,
+    ],
+  });
+
+  for await (const chunk of result) {
+    const text = chunk.choices[0]?.delta?.content || "";
+    if (text) yield text;
+  }
+}
+
 const chat = new Hono().basePath("/v1/chat");
 
 chat.post(
@@ -272,13 +321,21 @@ chat.post(
             pdfs,
             lastMsgText,
           )
-        : streamGoogleResponse(
-            systemPrompt,
-            messages,
-            resolvedModelId,
-            pdfs,
-            lastMsgText,
-          );
+        : provider === "openai"
+          ? streamOpenAIResponse(
+              systemPrompt,
+              messages,
+              resolvedModelId,
+              pdfs,
+              lastMsgText,
+            )
+          : streamGoogleResponse(
+              systemPrompt,
+              messages,
+              resolvedModelId,
+              pdfs,
+              lastMsgText,
+            );
 
     return stream(c, async (s) => {
       c.header("Content-Type", "text/plain; charset=utf-8");
