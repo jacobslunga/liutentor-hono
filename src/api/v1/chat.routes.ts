@@ -1,5 +1,4 @@
 import { GoogleGenAI } from "@google/genai";
-import OpenAI from "openai";
 import { HINT_MODE, SYSTEM_PROMPT } from "~/utils/prompts";
 import { chatMessageSchema, examIdSchema } from "./chat.schemas";
 import { bodyLimit } from "hono/body-limit";
@@ -14,11 +13,7 @@ const googleAI = new GoogleGenAI({
   apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY || "",
 });
 
-const openAI = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || "",
-});
-
-type Provider = "google" | "anthropic" | "openai";
+type Provider = "google" | "anthropic" | "xai";
 
 interface ModelConfig {
   provider: Provider;
@@ -29,7 +24,10 @@ const MODEL_MAP: Record<string, ModelConfig> = {
   "gemini-2.5-pro": { provider: "google", modelId: "gemini-2.5-flash" },
   "gemini-3.1-pro-preview": { provider: "google", modelId: "gemini-2.5-pro" },
   "gemini-3.1-flash-lite": { provider: "google", modelId: "gemini-2.5-flash" },
-  "gpt-4o": { provider: "openai", modelId: "gpt-4o" },
+  "grok-4-1-fast-non-reasoning": {
+    provider: "xai",
+    modelId: "grok-4-1-fast-non-reasoning",
+  },
 };
 
 const getModelConfig = (modelId: string): ModelConfig =>
@@ -199,7 +197,7 @@ async function* streamAnthropicResponse(
   }
 }
 
-async function* streamOpenAIResponse(
+async function* streamXAIResponse(
   systemPrompt: string,
   messages: any[],
   modelId: string,
@@ -207,11 +205,9 @@ async function* streamOpenAIResponse(
   lastMsgText: string,
 ): AsyncGenerator<string> {
   const pdfContents = pdfs.map((pdf) => ({
-    type: "file" as const,
-    file: {
-      filename: "exam.pdf",
-      file_data: `data:application/pdf;base64,${pdf.data}`,
-    },
+    type: "input_file" as const,
+    filename: "exam.pdf",
+    file_data: `data:application/pdf;base64,${pdf.data}`,
   }));
 
   const historyMessages = messages.slice(0, -1).map((msg: any) => ({
@@ -223,22 +219,56 @@ async function* streamOpenAIResponse(
 
   const lastMessage = {
     role: "user" as const,
-    content: [...pdfContents, { type: "text" as const, text: lastMsgText }],
+    content: [
+      ...pdfContents,
+      { type: "input_text" as const, text: lastMsgText },
+    ],
   };
 
-  const result = await openAI.chat.completions.create({
-    model: modelId,
-    stream: true,
-    messages: [
-      { role: "system", content: systemPrompt },
-      ...historyMessages,
-      lastMessage,
-    ],
+  const response = await fetch("https://api.x.ai/v1/responses", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.XAI_API_KEY || ""}`,
+    },
+    body: JSON.stringify({
+      model: modelId,
+      stream: true,
+      instructions: systemPrompt,
+      input: [...historyMessages, lastMessage],
+    }),
   });
 
-  for await (const chunk of result) {
-    const text = chunk.choices[0]?.delta?.content || "";
-    if (text) yield text;
+  if (!response.ok) {
+    const errorBody = await response.text();
+    console.error(`xAI API error ${response.status}:`, errorBody);
+    throw new Error(`xAI API error: ${response.statusText} — ${errorBody}`);
+  }
+
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const raw = line.slice(6).trim();
+      if (raw === "[DONE]") return;
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed?.type === "response.output_text.delta") {
+          const text = parsed?.delta ?? "";
+          if (text) yield text;
+        }
+      } catch {}
+    }
   }
 }
 
@@ -321,8 +351,8 @@ chat.post(
             pdfs,
             lastMsgText,
           )
-        : provider === "openai"
-          ? streamOpenAIResponse(
+        : provider === "xai"
+          ? streamXAIResponse(
               systemPrompt,
               messages,
               resolvedModelId,
