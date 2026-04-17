@@ -13,7 +13,7 @@ const googleAI = new GoogleGenAI({
   apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY || "",
 });
 
-type Provider = "google" | "anthropic" | "xai";
+type Provider = "google" | "anthropic" | "xai" | "openai";
 
 interface ModelConfig {
   provider: Provider;
@@ -28,6 +28,9 @@ const MODEL_MAP: Record<string, ModelConfig> = {
     provider: "xai",
     modelId: "grok-4-1-fast-non-reasoning",
   },
+  "gpt-4.1": { provider: "openai", modelId: "gpt-4.1" },
+  "gpt-4.1-mini": { provider: "openai", modelId: "gpt-4.1-mini" },
+  "gpt-4o": { provider: "openai", modelId: "gpt-4o" },
 };
 
 const getModelConfig = (modelId: string): ModelConfig =>
@@ -272,6 +275,81 @@ async function* streamXAIResponse(
   }
 }
 
+async function* streamOpenAIResponse(
+  systemPrompt: string,
+  messages: any[],
+  modelId: string,
+  pdfs: PdfData[],
+  lastMsgText: string,
+): AsyncGenerator<string> {
+  const pdfContents = pdfs.map((pdf) => ({
+    type: "input_file" as const,
+    filename: "exam.pdf",
+    file_data: `data:application/pdf;base64,${pdf.data}`,
+  }));
+
+  const historyMessages = messages.slice(0, -1).map((msg: any) => ({
+    role: (msg.role === "assistant" ? "assistant" : "user") as
+      | "assistant"
+      | "user",
+    content: extractTextContent(msg.content),
+  }));
+
+  const lastMessage = {
+    role: "user" as const,
+    content: [
+      ...pdfContents,
+      { type: "input_text" as const, text: lastMsgText },
+    ],
+  };
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.OPENAI_API_KEY || ""}`,
+    },
+    body: JSON.stringify({
+      model: modelId,
+      stream: true,
+      instructions: systemPrompt,
+      input: [...historyMessages, lastMessage],
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    console.error(`OpenAI API error ${response.status}:`, errorBody);
+    throw new Error(`OpenAI API error: ${response.statusText} — ${errorBody}`);
+  }
+
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const raw = line.slice(6).trim();
+      if (raw === "[DONE]") return;
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed?.type === "response.output_text.delta") {
+          const text = parsed?.delta ?? "";
+          if (text) yield text;
+        }
+      } catch {}
+    }
+  }
+}
+
 const chat = new Hono().basePath("/v1/chat");
 
 chat.post(
@@ -359,13 +437,21 @@ chat.post(
               pdfs,
               lastMsgText,
             )
-          : streamGoogleResponse(
-              systemPrompt,
-              messages,
-              resolvedModelId,
-              pdfs,
-              lastMsgText,
-            );
+          : provider === "openai"
+            ? streamOpenAIResponse(
+                systemPrompt,
+                messages,
+                resolvedModelId,
+                pdfs,
+                lastMsgText,
+              )
+            : streamGoogleResponse(
+                systemPrompt,
+                messages,
+                resolvedModelId,
+                pdfs,
+                lastMsgText,
+              );
 
     return stream(c, async (s) => {
       c.header("Content-Type", "text/plain; charset=utf-8");
