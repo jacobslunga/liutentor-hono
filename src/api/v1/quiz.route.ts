@@ -19,7 +19,7 @@ import { insertQuizIfNotDuplicate } from "./quiz.cache";
 
 const quiz = new Hono().basePath("/v1/quiz");
 
-const OPENAI_MODEL = "gpt-5.4-nano";
+const OPENAI_MODEL = "gpt-4o";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || "",
