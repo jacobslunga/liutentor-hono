@@ -13,7 +13,7 @@ const googleAI = new GoogleGenAI({
   apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY || "",
 });
 
-type Provider = "google" | "anthropic" | "xai" | "openai";
+type Provider = "google" | "anthropic" | "openai";
 
 interface ModelConfig {
   provider: Provider;
@@ -24,10 +24,6 @@ const MODEL_MAP: Record<string, ModelConfig> = {
   "gemini-2.5-pro": { provider: "google", modelId: "gemini-2.5-flash" },
   "gemini-3.1-pro-preview": { provider: "google", modelId: "gemini-2.5-pro" },
   "gemini-3.1-flash-lite": { provider: "google", modelId: "gemini-2.5-flash" },
-  "grok-4-1-fast-non-reasoning": {
-    provider: "xai",
-    modelId: "grok-4-1-fast-non-reasoning",
-  },
   "gpt-4.1": { provider: "openai", modelId: "gpt-4.1" },
   "gpt-4.1-mini": { provider: "openai", modelId: "gpt-4.1-mini" },
   "gpt-4o": { provider: "openai", modelId: "gpt-4o" },
@@ -429,29 +425,21 @@ chat.post(
             pdfs,
             lastMsgText,
           )
-        : provider === "xai"
-          ? streamXAIResponse(
+        : provider === "openai"
+          ? streamOpenAIResponse(
               systemPrompt,
               messages,
               resolvedModelId,
               pdfs,
               lastMsgText,
             )
-          : provider === "openai"
-            ? streamOpenAIResponse(
-                systemPrompt,
-                messages,
-                resolvedModelId,
-                pdfs,
-                lastMsgText,
-              )
-            : streamGoogleResponse(
-                systemPrompt,
-                messages,
-                resolvedModelId,
-                pdfs,
-                lastMsgText,
-              );
+          : streamGoogleResponse(
+              systemPrompt,
+              messages,
+              resolvedModelId,
+              pdfs,
+              lastMsgText,
+            );
 
     return stream(c, async (s) => {
       c.header("Content-Type", "text/plain; charset=utf-8");

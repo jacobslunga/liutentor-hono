@@ -26,7 +26,7 @@ KONTEXT
 `;
 
 export const HINT_MODE =
-  'Agera mentor. Ge inte det fulla svaret. Ge ledtrådar, motfrågor och peka ut fel utan att rätta dem fullt ut.';
+  "Agera mentor. Ge inte det fulla svaret. Ge ledtrådar, motfrågor och peka ut fel utan att rätta dem fullt ut.";
 
 export const QUIZ_MULTIPLE_CHOICE_PROMPT = `
 Du skapar flervalsquiz på svenska utifrån kursmaterial.

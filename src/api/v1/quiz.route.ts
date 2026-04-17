@@ -4,7 +4,7 @@ import { HTTPException } from "hono/http-exception";
 import { bodyLimit } from "hono/body-limit";
 import { timeout } from "hono/timeout";
 import { stream } from "hono/streaming";
-import { GoogleGenAI } from "@google/genai";
+import OpenAI from "openai";
 import { z } from "zod";
 
 import { supabase } from "~/db/supabase";
@@ -19,10 +19,10 @@ import { insertQuizIfNotDuplicate } from "./quiz.cache";
 
 const quiz = new Hono().basePath("/v1/quiz");
 
-const GOOGLE_MODEL = "gemini-2.5-flash";
+const OPENAI_MODEL = "gpt-5.4-nano";
 
-const googleAI = new GoogleGenAI({
-  apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY || "",
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY || "",
 });
 
 const multipleChoiceBodySchema = z.object({
@@ -58,7 +58,6 @@ Regler:
 - "answer" är det 0-baserade indexet för det korrekta alternativet (0, 1, 2 eller 3).
 - Alla frågor och svarsalternativ MÅSTE vara skrivna på svenska.
 - Om tentafrågorna är på engelska, översätt till svenska.
-- Matematiska formler och notation ska behållas som de är (t.ex. LaTeX).
 - Svara med enbart rå JSON. Ingen wrapping, inga backticks, ingen extra text.
 `;
 
@@ -139,42 +138,37 @@ async function getExamSources(courseCode: string, examIds?: number[]) {
   return shuffled.slice(0, takeCount);
 }
 
-async function generateQuizFromGoogle(
+async function generateQuizFromOpenAI(
   pdfs: { data: string; mimeType: string }[],
   promptText: string,
 ): Promise<MultipleChoiceQuiz> {
-  const pdfParts = pdfs.map((pdf) => ({
-    inlineData: {
-      data: pdf.data,
-      mimeType: pdf.mimeType,
+  const pdfContents = pdfs.map((pdf) => ({
+    type: "file" as const,
+    file: {
+      filename: "exam.pdf",
+      file_data: `data:application/pdf;base64,${pdf.data}`,
     },
   }));
 
-  const result = await googleAI.models.generateContent({
-    model: GOOGLE_MODEL,
-    contents: [
+  const response = await openai.chat.completions.create({
+    model: OPENAI_MODEL,
+    messages: [
+      {
+        role: "system",
+        content: QUIZ_JSON_INSTRUCTION,
+      },
       {
         role: "user",
-        parts: [...pdfParts, { text: promptText }],
+        content: [...pdfContents, { type: "text" as const, text: promptText }],
       },
     ],
-    config: {
-      systemInstruction: QUIZ_JSON_INSTRUCTION,
-    },
+    response_format: { type: "json_object" },
   });
 
-  const text = result.text ?? "";
+  const text = response.choices[0]?.message?.content ?? "";
+  if (!text) throw new Error("OpenAI returned empty response");
 
-  if (!text) {
-    throw new Error("Gemini returned empty response");
-  }
-
-  const cleaned = text
-    .replace(/```json\s*/g, "")
-    .replace(/```\s*/g, "")
-    .trim();
-
-  return multipleChoiceQuizSchema.parse(JSON.parse(cleaned));
+  return multipleChoiceQuizSchema.parse(JSON.parse(text));
 }
 
 quiz.post(
@@ -188,10 +182,8 @@ quiz.post(
     const { examIds, customPrompt } = c.req.valid("json");
     const anonymousUserId = c.req.header("x-anonymous-user-id") || "unknown";
 
-    if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
-      throw new HTTPException(500, {
-        message: "Missing GOOGLE_GENERATIVE_AI_API_KEY",
-      });
+    if (!process.env.OPENAI_API_KEY) {
+      throw new HTTPException(500, { message: "Missing OPENAI_API_KEY" });
     }
 
     return stream(c, async (s) => {
@@ -213,7 +205,7 @@ quiz.post(
       console.log(
         `${cyan}┌─ QUIZ REQUEST ${"─".repeat(35)}\n` +
           `│${reset}  ${bold}Course${reset}   ${dim}→${reset}  ${courseCode}\n` +
-          `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${GOOGLE_MODEL}\n` +
+          `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${OPENAI_MODEL}\n` +
           `${cyan}│${reset}  ${bold}Exams${reset}    ${dim}→${reset}  ${examIds ? examIds.join(", ") : "random"}\n` +
           `${cyan}│${reset}  ${bold}Custom${reset}   ${dim}→${reset}  ${customPrompt ? `"${customPrompt.slice(0, 40)}${customPrompt.length > 40 ? "…" : ""}"` : "none"}\n` +
           `${cyan}│${reset}  ${bold}User${reset}     ${dim}→${reset}  ${dim}${anonymousUserId}${reset}\n` +
@@ -280,7 +272,7 @@ quiz.post(
           mimeType: "application/pdf" as const,
         }));
 
-        const parsed = await generateQuizFromGoogle(pdfs, promptText);
+        const parsed = await generateQuizFromOpenAI(pdfs, promptText);
         const normalizedQuiz = multipleChoiceQuizSchema.parse(
           rebalanceQuizAnswerDistribution(parsed),
         );
@@ -299,20 +291,18 @@ quiz.post(
           quiz: normalizedQuiz,
           source_exam_ids: sourceExamIds,
           source_count: validExams.length,
-          model: GOOGLE_MODEL,
+          model: OPENAI_MODEL,
         });
 
-        const resultPayload = {
+        await sendEvent("result", {
           ...normalizedQuiz,
           meta: {
             courseCode,
             sourceExamIds,
             sourceCount: validExams.length,
-            model: GOOGLE_MODEL,
+            model: OPENAI_MODEL,
           },
-        };
-
-        await sendEvent("result", resultPayload);
+        });
       } catch (error: any) {
         console.error("Quiz generation failed:", error);
         await sendEvent("error", {
