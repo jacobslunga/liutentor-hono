@@ -16,6 +16,7 @@ import {
 import { QUIZ_MULTIPLE_CHOICE_PROMPT } from "~/utils/prompts";
 import { rebalanceQuizAnswerDistribution } from "./quiz.utils";
 import { logQuizGeneration } from "./quiz.cache";
+import { getAuthenticatedUserId } from "~/utils/auth";
 
 const quiz = new Hono().basePath("/v1/quiz");
 
@@ -36,7 +37,6 @@ const multipleChoiceBodySchema = z.object({
     .max(300, "Custom prompt must be 300 characters or less")
     .trim()
     .optional(),
-  userId: z.uuid().optional(),
 });
 
 const QUIZ_JSON_INSTRUCTION = `
@@ -180,8 +180,9 @@ quiz.post(
   timeout(120000),
   async (c) => {
     const { courseCode } = c.req.valid("param");
-    const { examIds, customPrompt, userId } = c.req.valid("json");
+    const { examIds, customPrompt } = c.req.valid("json");
     const anonymousUserId = c.req.header("x-anonymous-user-id") || "unknown";
+    const userId = await getAuthenticatedUserId(c.req.header("Authorization"));
 
     if (!process.env.OPENAI_API_KEY) {
       throw new HTTPException(500, { message: "Missing OPENAI_API_KEY" });
@@ -209,7 +210,7 @@ quiz.post(
           `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${OPENAI_MODEL}\n` +
           `${cyan}│${reset}  ${bold}Exams${reset}    ${dim}→${reset}  ${examIds ? examIds.join(", ") : "random"}\n` +
           `${cyan}│${reset}  ${bold}Custom${reset}   ${dim}→${reset}  ${customPrompt ? `"${customPrompt.slice(0, 40)}${customPrompt.length > 40 ? "…" : ""}"` : "none"}\n` +
-          `${cyan}│${reset}  ${bold}User${reset}     ${dim}→${reset}  ${dim}${anonymousUserId}${reset}\n` +
+          `${cyan}│${reset}  ${bold}User${reset}     ${dim}→${reset}  ${dim}${userId ?? `anon:${anonymousUserId}`}${reset}\n` +
           `${cyan}└${"─".repeat(50)}${reset}`,
       );
 
@@ -286,7 +287,7 @@ quiz.post(
         const sourceExamIds = validExams.map((x) => x.id);
 
         logQuizGeneration({
-          user_id: userId || null,
+          user_id: userId,
           anonymous_user_id: anonymousUserId,
           course_code: courseCode,
           quiz_type: "multiple_choice",

@@ -13,6 +13,10 @@ import {
   streamGoogleResponse,
   streamOpenAIResponse,
 } from "~/utils/chat.utils";
+import {
+  getAuthenticatedUserId,
+  assertConversationOwnership,
+} from "~/utils/auth";
 
 type Provider = "google" | "anthropic" | "openai";
 
@@ -85,12 +89,23 @@ chat.post(
       solutionUrl,
       courseCode,
       conversationId,
-      userId,
       modelId = "gemini-2.5-pro",
     } = body as any;
 
     if (!examUrl || !messages?.length) {
       throw new HTTPException(400, { message: "Missing examUrl or messages" });
+    }
+
+    const anonymousUserId = c.req.header("x-anonymous-user-id") || "unknown";
+    const userId = await getAuthenticatedUserId(c.req.header("Authorization"));
+
+    if (conversationId) {
+      if (!userId) {
+        throw new HTTPException(401, {
+          message: "Authentication required for conversations",
+        });
+      }
+      await assertConversationOwnership(conversationId, userId);
     }
 
     const { provider, modelId: resolvedModelId } = getModelConfig(modelId);
@@ -109,14 +124,14 @@ chat.post(
         `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${resolvedModelId}  ${dim}(${provider})${reset}\n` +
         `${cyan}│${reset}  ${bold}Messages${reset} ${dim}→${reset}  ${messages.length}\n` +
         `${cyan}│${reset}  ${bold}Solution${reset} ${dim}→${reset}  ${solutionUrl ? "yes" : "no"}\n` +
-        `${cyan}│${reset}  ${bold}User${reset}     ${dim}→${reset}  ${dim}${c.req.header("x-anonymous-user-id") ?? "unknown"}${reset}\n` +
+        `${cyan}│${reset}  ${bold}User${reset}     ${dim}→${reset}  ${dim}${userId ?? `anon:${anonymousUserId}`}${reset}\n` +
         `${cyan}└${"─".repeat(50)}${reset}`,
     );
 
     logToDBAsync({
-      user_id: userId || null,
+      user_id: userId,
       conversation_id: conversationId || null,
-      anonymous_user_id: c.req.header("x-anonymous-user-id") || "unknown",
+      anonymous_user_id: anonymousUserId,
       course_code: courseCode,
       exam_id: examId,
       role: "user",
@@ -182,9 +197,9 @@ chat.post(
       }
 
       logToDBAsync({
-        user_id: userId || null,
+        user_id: userId,
         conversation_id: conversationId || null,
-        anonymous_user_id: c.req.header("x-anonymous-user-id") || "unknown",
+        anonymous_user_id: anonymousUserId,
         course_code: courseCode,
         exam_id: examId,
         role: "assistant",
