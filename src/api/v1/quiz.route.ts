@@ -4,7 +4,6 @@ import { HTTPException } from "hono/http-exception";
 import { bodyLimit } from "hono/body-limit";
 import { timeout } from "hono/timeout";
 import { stream } from "hono/streaming";
-import OpenAI from "openai";
 import { z } from "zod";
 
 import { supabase } from "~/db/supabase";
@@ -18,13 +17,15 @@ import { rebalanceQuizAnswerDistribution } from "./quiz.utils";
 import { logQuizGeneration } from "./quiz.cache";
 import { getAuthenticatedUserId } from "~/utils/auth";
 
-const quiz = new Hono().basePath("/v1/quiz");
+import { GoogleGenAI } from "@google/genai";
 
-const OPENAI_MODEL = "gpt-4o";
+const GEMINI_MODEL = "gemini-3.1-flash-lite-preview";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || "",
+const genai = new GoogleGenAI({
+  apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY || "",
 });
+
+const quiz = new Hono().basePath("/v1/quiz");
 
 const multipleChoiceBodySchema = z.object({
   examIds: z
@@ -139,35 +140,35 @@ async function getExamSources(courseCode: string, examIds?: number[]) {
   return shuffled.slice(0, takeCount);
 }
 
-async function generateQuizFromOpenAI(
+async function generateQuizFromGemini(
   pdfs: { data: string; mimeType: string }[],
   promptText: string,
 ): Promise<MultipleChoiceQuiz> {
-  const pdfContents = pdfs.map((pdf) => ({
-    type: "file" as const,
-    file: {
-      filename: "exam.pdf",
-      file_data: `data:application/pdf;base64,${pdf.data}`,
+  const pdfParts = pdfs.map((pdf) => ({
+    inlineData: {
+      mimeType: "application/pdf",
+      data: pdf.data,
     },
   }));
 
-  const response = await openai.chat.completions.create({
-    model: OPENAI_MODEL,
-    messages: [
-      {
-        role: "system",
-        content: QUIZ_JSON_INSTRUCTION,
-      },
+  const response = await genai.models.generateContent({
+    model: GEMINI_MODEL,
+    contents: [
       {
         role: "user",
-        content: [...pdfContents, { type: "text" as const, text: promptText }],
+        parts: [
+          ...pdfParts,
+          { text: QUIZ_JSON_INSTRUCTION + "\n\n" + promptText },
+        ],
       },
     ],
-    response_format: { type: "json_object" },
+    config: {
+      responseMimeType: "application/json",
+    },
   });
 
-  const text = response.choices[0]?.message?.content ?? "";
-  if (!text) throw new Error("OpenAI returned empty response");
+  const text = response.text ?? "";
+  if (!text) throw new Error("Gemini returned empty response");
 
   return multipleChoiceQuizSchema.parse(JSON.parse(text));
 }
@@ -183,10 +184,6 @@ quiz.post(
     const { examIds, customPrompt } = c.req.valid("json");
     const anonymousUserId = c.req.header("x-anonymous-user-id") || "unknown";
     const userId = await getAuthenticatedUserId(c.req.header("Authorization"));
-
-    if (!process.env.OPENAI_API_KEY) {
-      throw new HTTPException(500, { message: "Missing OPENAI_API_KEY" });
-    }
 
     return stream(c, async (s) => {
       c.header("Content-Type", "text/event-stream");
@@ -207,7 +204,7 @@ quiz.post(
       console.log(
         `${cyan}┌─ QUIZ REQUEST ${"─".repeat(35)}\n` +
           `│${reset}  ${bold}Course${reset}   ${dim}→${reset}  ${courseCode}\n` +
-          `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${OPENAI_MODEL}\n` +
+          `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${GEMINI_MODEL}\n` +
           `${cyan}│${reset}  ${bold}Exams${reset}    ${dim}→${reset}  ${examIds ? examIds.join(", ") : "random"}\n` +
           `${cyan}│${reset}  ${bold}Custom${reset}   ${dim}→${reset}  ${customPrompt ? `"${customPrompt.slice(0, 40)}${customPrompt.length > 40 ? "…" : ""}"` : "none"}\n` +
           `${cyan}│${reset}  ${bold}User${reset}     ${dim}→${reset}  ${dim}${userId ?? `anon:${anonymousUserId}`}${reset}\n` +
@@ -274,7 +271,7 @@ quiz.post(
           mimeType: "application/pdf" as const,
         }));
 
-        const parsed = await generateQuizFromOpenAI(pdfs, promptText);
+        const parsed = await generateQuizFromGemini(pdfs, promptText);
         const normalizedQuiz = multipleChoiceQuizSchema.parse(
           rebalanceQuizAnswerDistribution(parsed),
         );
@@ -294,7 +291,7 @@ quiz.post(
           quiz: normalizedQuiz,
           source_exam_ids: sourceExamIds,
           source_count: validExams.length,
-          model: OPENAI_MODEL,
+          model: GEMINI_MODEL,
         });
 
         await sendEvent("result", {
@@ -303,7 +300,7 @@ quiz.post(
             courseCode,
             sourceExamIds,
             sourceCount: validExams.length,
-            model: OPENAI_MODEL,
+            model: GEMINI_MODEL,
           },
         });
       } catch (error: any) {

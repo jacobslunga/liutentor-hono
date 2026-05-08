@@ -29,7 +29,6 @@ const MODEL_MAP: Record<string, ModelConfig> = {
     provider: "google",
     modelId: "gemini-3.1-flash-lite-preview",
   },
-  "gpt-5-nano": { provider: "openai", modelId: "gpt-5-nano" },
 };
 
 const getModelConfig = (modelId: string): ModelConfig =>
