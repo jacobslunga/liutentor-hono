@@ -7,17 +7,13 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { stream } from "hono/streaming";
 import { supabase } from "~/db/supabase";
-import {
-  streamGoogleResponse,
-  streamOpenAIResponse,
-  PdfData,
-} from "~/utils/chat.utils";
+import { streamGoogleResponse, PdfData } from "~/utils/chat.utils";
 import {
   getAuthenticatedUserId,
   assertConversationOwnership,
 } from "~/utils/auth";
 
-type Provider = "google" | "openai";
+type Provider = "google";
 
 interface ModelConfig {
   provider: Provider;
@@ -28,6 +24,10 @@ const MODEL_MAP: Record<string, ModelConfig> = {
   "gemini-3.1-flash-lite-preview": {
     provider: "google",
     modelId: "gemini-3.1-flash-lite-preview",
+  },
+  "gemini-3.5-flash": {
+    provider: "google",
+    modelId: "gemini-3.5-flash",
   },
 };
 
@@ -162,22 +162,13 @@ chat.post(
 
     const systemPrompt = SYSTEM_PROMPT;
 
-    const responseStream =
-      provider === "openai"
-        ? streamOpenAIResponse(
-            systemPrompt,
-            messages,
-            resolvedModelId,
-            pdfs,
-            lastMsgText,
-          )
-        : streamGoogleResponse(
-            systemPrompt,
-            messages,
-            resolvedModelId,
-            pdfs,
-            lastMsgText,
-          );
+    const responseStream = streamGoogleResponse(
+      systemPrompt,
+      messages,
+      resolvedModelId,
+      pdfs,
+      lastMsgText,
+    );
 
     return stream(c, async (s) => {
       c.header("Content-Type", "text/plain; charset=utf-8");
