@@ -21,13 +21,13 @@ interface ModelConfig {
 }
 
 const MODEL_MAP: Record<string, ModelConfig> = {
-  "gemini-3.1-flash-lite-preview": {
+  "gemini-3.1-flash-lite": {
     provider: "google",
-    modelId: "gemini-3.1-flash-lite-preview",
+    modelId: "gemini-3.1-flash-lite",
   },
-  "gemini-3.5-flash": {
+  "gemini-3-flash-preview": {
     provider: "google",
-    modelId: "gemini-3.5-flash",
+    modelId: "gemini-3-flash-preview",
   },
 };
 
@@ -119,13 +119,13 @@ chat.post(
     const bold = "\x1b[1m";
     console.log(
       `${cyan}┌─ CHAT REQUEST ${"─".repeat(35)}\n` +
-        `│${reset}  ${bold}Course${reset}   ${dim}→${reset}  ${courseCode ?? "unknown"}\n` +
-        `${cyan}│${reset}  ${bold}Exam ID${reset}  ${dim}→${reset}  ${examId}\n` +
-        `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${resolvedModelId}  ${dim}(${provider})${reset}\n` +
-        `${cyan}│${reset}  ${bold}Messages${reset} ${dim}→${reset}  ${messages.length}\n` +
-        `${cyan}│${reset}  ${bold}Solution${reset} ${dim}→${reset}  ${solutionUrl ? "yes" : "no"}\n` +
-        `${cyan}│${reset}  ${bold}User${reset}     ${dim}→${reset}  ${dim}${userId ?? `anon:${anonymousUserId}`}${reset}\n` +
-        `${cyan}└${"─".repeat(50)}${reset}`,
+      `│${reset}  ${bold}Course${reset}   ${dim}→${reset}  ${courseCode ?? "unknown"}\n` +
+      `${cyan}│${reset}  ${bold}Exam ID${reset}  ${dim}→${reset}  ${examId}\n` +
+      `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${resolvedModelId}  ${dim}(${provider})${reset}\n` +
+      `${cyan}│${reset}  ${bold}Messages${reset} ${dim}→${reset}  ${messages.length}\n` +
+      `${cyan}│${reset}  ${bold}Solution${reset} ${dim}→${reset}  ${solutionUrl ? "yes" : "no"}\n` +
+      `${cyan}│${reset}  ${bold}User${reset}     ${dim}→${reset}  ${dim}${userId ?? `anon:${anonymousUserId}`}${reset}\n` +
+      `${cyan}└${"─".repeat(50)}${reset}`,
     );
 
     logToDBAsync({
