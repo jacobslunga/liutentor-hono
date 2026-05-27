@@ -34,7 +34,7 @@ const MODEL_MAP: Record<string, ModelConfig> = {
 const getModelConfig = (modelId: string): ModelConfig =>
   MODEL_MAP[modelId] ?? {
     provider: "google",
-    modelId: "gemini-3.1-flash-lite-preview",
+    modelId: "gemini-3.1-flash-lite",
   };
 
 function extractTextContent(content: unknown): string {
@@ -89,7 +89,7 @@ chat.post(
       solutionUrl,
       courseCode,
       conversationId,
-      modelId = "gemini-3.1-flash-lite-preview",
+      modelId = "gemini-3.1-flash-lite",
     } = body as any;
 
     if (!examUrl || !messages?.length) {

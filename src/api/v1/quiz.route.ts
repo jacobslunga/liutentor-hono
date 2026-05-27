@@ -19,7 +19,7 @@ import { getAuthenticatedUserId } from "~/utils/auth";
 
 import { GoogleGenAI } from "@google/genai";
 
-const GEMINI_MODEL = "gemini-3.1-flash-lite-preview";
+const GEMINI_MODEL = "gemini-3.1-flash-lite";
 
 const genai = new GoogleGenAI({
   apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY || "",
@@ -203,12 +203,12 @@ quiz.post(
       const bold = "\x1b[1m";
       console.log(
         `${cyan}┌─ QUIZ REQUEST ${"─".repeat(35)}\n` +
-          `│${reset}  ${bold}Course${reset}   ${dim}→${reset}  ${courseCode}\n` +
-          `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${GEMINI_MODEL}\n` +
-          `${cyan}│${reset}  ${bold}Exams${reset}    ${dim}→${reset}  ${examIds ? examIds.join(", ") : "random"}\n` +
-          `${cyan}│${reset}  ${bold}Custom${reset}   ${dim}→${reset}  ${customPrompt ? `"${customPrompt.slice(0, 40)}${customPrompt.length > 40 ? "…" : ""}"` : "none"}\n` +
-          `${cyan}│${reset}  ${bold}User${reset}     ${dim}→${reset}  ${dim}${userId ?? `anon:${anonymousUserId}`}${reset}\n` +
-          `${cyan}└${"─".repeat(50)}${reset}`,
+        `│${reset}  ${bold}Course${reset}   ${dim}→${reset}  ${courseCode}\n` +
+        `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${GEMINI_MODEL}\n` +
+        `${cyan}│${reset}  ${bold}Exams${reset}    ${dim}→${reset}  ${examIds ? examIds.join(", ") : "random"}\n` +
+        `${cyan}│${reset}  ${bold}Custom${reset}   ${dim}→${reset}  ${customPrompt ? `"${customPrompt.slice(0, 40)}${customPrompt.length > 40 ? "…" : ""}"` : "none"}\n` +
+        `${cyan}│${reset}  ${bold}User${reset}     ${dim}→${reset}  ${dim}${userId ?? `anon:${anonymousUserId}`}${reset}\n` +
+        `${cyan}└${"─".repeat(50)}${reset}`,
       );
 
       try {
