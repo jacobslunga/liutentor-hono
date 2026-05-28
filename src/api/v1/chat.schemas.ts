@@ -41,6 +41,7 @@ export const chatMessageSchema = z.object({
   isFirstMessage: z.boolean().optional(),
   modelId: z.string().optional(),
   conversationId: z.uuid().optional().nullable(),
+  selectionContext: z.string().max(2000).optional(),
 });
 
 /**

@@ -90,6 +90,7 @@ chat.post(
       courseCode,
       conversationId,
       modelId = "gemini-3.1-flash-lite",
+      selectionContext,
     } = body as any;
 
     if (!examUrl || !messages?.length) {
@@ -168,6 +169,7 @@ chat.post(
       resolvedModelId,
       pdfs,
       lastMsgText,
+      selectionContext,
     );
 
     return stream(c, async (s) => {

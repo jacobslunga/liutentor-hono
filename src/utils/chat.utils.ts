@@ -32,6 +32,7 @@ async function* streamGoogleResponse(
   modelId: string,
   pdfs: PdfData[],
   lastMsgText: string,
+  selectionContext?: string,
 ): AsyncGenerator<string> {
   const history = messages
     .slice(0, -1)
@@ -62,12 +63,16 @@ async function* streamGoogleResponse(
     { inlineData: { data: pdf.data, mimeType: pdf.mimeType } },
   ]);
 
+  const lastMsgWithContext = selectionContext
+    ? `[Användaren hänvisar till följande markerade text:\n"${selectionContext}"]\n\n${lastMsgText}`
+    : lastMsgText;
+
   const result = await googleAI.models.generateContentStream({
     model: modelId,
     contents: [
       ...(pdfParts.length > 0 ? [{ role: "user", parts: pdfParts }] : []),
       ...history,
-      { role: "user", parts: [{ text: lastMsgText }] },
+      { role: "user", parts: [{ text: lastMsgWithContext }] },
     ],
     config: { systemInstruction: systemPrompt },
   });
