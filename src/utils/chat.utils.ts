@@ -6,20 +6,10 @@ export interface PdfData {
   label: "tenta" | "facit";
 }
 
-function extractTextContent(content: unknown): string {
-  if (Array.isArray(content)) {
-    const textPart = content.find(
-      (part: any) => part?.type === "text" && typeof part?.text === "string",
-    );
-    return textPart?.text || "";
-  }
-  return typeof content === "string" ? content : "";
-}
-
 function getPdfLabelText(label: "tenta" | "facit"): string {
   return label === "tenta"
-    ? "FÖLJANDE PDF ÄR TENTAN MED UPPGIFTERNA DU SKA LÖSA:"
-    : "FÖLJANDE PDF ÄR FACIT — ANVÄND ENDAST FÖR VERIFIERING, HÄRLED ALLTID LÖSNINGEN SJÄLV:";
+    ? "Bifogad PDF: tentan med uppgifterna. Lös endast det användaren uttryckligen ber om."
+    : "Bifogad PDF: facit. Använd endast som referens när användaren frågar om en specifik uppgift, och redovisa aldrig lösningar oombedd.";
 }
 
 const googleAI = new GoogleGenAI({
@@ -70,9 +60,11 @@ async function* streamGoogleResponse(
   const result = await googleAI.models.generateContentStream({
     model: modelId,
     contents: [
-      ...(pdfParts.length > 0 ? [{ role: "user", parts: pdfParts }] : []),
       ...history,
-      { role: "user", parts: [{ text: lastMsgWithContext }] },
+      {
+        role: "user",
+        parts: [...pdfParts, { text: lastMsgWithContext }],
+      },
     ],
     config: { systemInstruction: systemPrompt },
   });
