@@ -1,13 +1,20 @@
 import { extractImages, extractText, getDocumentProxy } from "unpdf";
 import sharp from "sharp";
 
+// Keep sharp/libvips from ballooning memory on Cloud Run: no operation cache,
+// and one conversion at a time instead of one per vCPU.
+sharp.cache(false);
+sharp.concurrency(1);
+
 export type GeminiPart =
   | { text: string }
-  | { inlineData: { data: string; mimeType: "image/png" } };
+  | {
+      inlineData: { data: string; mimeType: "image/png" | "application/pdf" };
+    };
 
 const SCANNED_TEXT_THRESHOLD = 500;
 const MAX_IMAGES_PER_PDF = 20;
-const MAX_IMAGE_WIDTH = 1600;
+const MAX_IMAGE_WIDTH = 1024;
 
 function getPdfLabelText(label: "tenta" | "facit"): string {
   return label === "tenta"
@@ -92,43 +99,47 @@ async function pdfToGeminiParts(
   const bytes = await fetchPdfBytes(url);
   if (!bytes) return [];
 
-  const pdf = await getDocumentProxy(bytes);
-  const { totalPages, text } = await extractText(pdf, { mergePages: true });
+  // pdf.js detaches the buffer it's given, so hand it a copy and keep `bytes`
+  // readable for the raw-PDF fallback below.
+  const pdf = await getDocumentProxy(bytes.slice());
+  try {
+    const { totalPages, text } = await extractText(pdf, { mergePages: true });
 
-  const cleanText = text.trim();
-  const isScanned = cleanText.length < SCANNED_TEXT_THRESHOLD;
+    const cleanText = text.trim();
+    const isScanned = cleanText.length < SCANNED_TEXT_THRESHOLD;
 
-  const parts: GeminiPart[] = [];
-  parts.push({ text: getPdfLabelText(label) });
+    const parts: GeminiPart[] = [];
+    parts.push({ text: getPdfLabelText(label) });
 
-  if (!isScanned) {
-    parts.push({ text: cleanText });
+    if (!isScanned) {
+      parts.push({ text: cleanText });
 
-    const imageParts = await extractPdfImageParts(pdf, totalPages);
-    parts.push(...imageParts);
+      const imageParts = await extractPdfImageParts(pdf, totalPages);
+      parts.push(...imageParts);
 
-    console.log(
-      `[pdf:${label}] pages=${totalPages} textLen=${cleanText.length} scanned=false images=${imageParts.length / 2}`,
-    );
-  } else {
-    parts.push({
-      text: "Denna PDF verkar vara inskannad och innehåller lite eller ingen extraherbar text. Sidorna bifogas som bilder.",
-    });
+      console.log(
+        `[pdf:${label}] pages=${totalPages} textLen=${cleanText.length} scanned=false images=${imageParts.length / 2}`,
+      );
+    } else {
+      // No usable text: fall back to handing Gemini the raw PDF, like before.
+      // Cheaper on memory than decoding + converting every page via sharp.
+      parts.push({
+        inlineData: {
+          data: Buffer.from(bytes).toString("base64"),
+          mimeType: "application/pdf",
+        },
+      });
 
-    const imageParts = await extractPdfImageParts(pdf, totalPages);
-
-    if (imageParts.length === 0) {
-      throw new Error("PDF looked scanned, but no images could be extracted");
+      console.log(
+        `[pdf:${label}] pages=${totalPages} textLen=${cleanText.length} scanned=true (raw pdf fallback)`,
+      );
     }
 
-    parts.push(...imageParts);
-
-    console.log(
-      `[pdf:${label}] pages=${totalPages} textLen=${cleanText.length} scanned=true images=${imageParts.length / 2}`,
-    );
+    return parts;
+  } finally {
+    // Release pdf.js buffers as soon as we're done with the document.
+    await pdf.destroy?.();
   }
-
-  return parts;
 }
 
 export { fetchPdfBytes, pdfToGeminiParts, extractPdfImageParts };

@@ -126,12 +126,12 @@ chat.post(
       model: resolvedModelId,
     });
 
-    const [examParts, solutionParts] = await Promise.all([
-      pdfToGeminiParts(examUrl, "tenta"),
-      solutionUrl
-        ? pdfToGeminiParts(solutionUrl, "facit")
-        : Promise.resolve([]),
-    ]);
+    // Process PDFs sequentially, not in parallel: image decoding holds large
+    // raw pixel buffers, and doing both at once doubles peak memory.
+    const examParts = await pdfToGeminiParts(examUrl, "tenta");
+    const solutionParts = solutionUrl
+      ? await pdfToGeminiParts(solutionUrl, "facit")
+      : [];
 
     const pdfParts = [...examParts, ...solutionParts];
 
