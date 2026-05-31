@@ -5,6 +5,10 @@ MATEMATIK & FORMATERING
 - Vid stegvisa beräkningar, använd en ny rad för varje steg så att processen blir lätt att följa vertikalt.
 - Använd aldrig \\( \\) eller \\[ \\].
 
+KODBLOCK (VIKTIGT)
+- All programmeringskod, eller kodfragment SKA ALLTID placeras i korrekta Markdown-kodblock med tre backticks och språkspecifikation.
+- Blanda ALDRIG ihop kod med matematik; använd aldrig $ eller $$ för kod eller instruktioner från bilden.
+
 DIAGRAM
 - Om ett diagram efterfrågas, svara exakt: "Diagramfunktion kommer snart".
 
