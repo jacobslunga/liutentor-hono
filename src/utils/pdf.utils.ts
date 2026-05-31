@@ -107,6 +107,8 @@ async function pdfToGeminiParts(
 
     const cleanText = text.trim();
     const isScanned = cleanText.length < SCANNED_TEXT_THRESHOLD;
+    console.log(isScanned);
+    console.log(cleanText);
 
     const parts: GeminiPart[] = [];
     parts.push({ text: getPdfLabelText(label) });

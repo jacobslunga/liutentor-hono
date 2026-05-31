@@ -126,12 +126,15 @@ chat.post(
       model: resolvedModelId,
     });
 
-    // Process PDFs sequentially, not in parallel: image decoding holds large
-    // raw pixel buffers, and doing both at once doubles peak memory.
-    const examParts = await pdfToGeminiParts(examUrl, "tenta");
-    const solutionParts = solutionUrl
-      ? await pdfToGeminiParts(solutionUrl, "facit")
-      : [];
+    // Process both PDFs in parallel: the work is mostly network I/O, and
+    // sharp.concurrency(1) globally serializes the heavy image conversions, so
+    // peak memory stays bounded even when both take the image path.
+    const [examParts, solutionParts] = await Promise.all([
+      pdfToGeminiParts(examUrl, "tenta"),
+      solutionUrl
+        ? pdfToGeminiParts(solutionUrl, "facit")
+        : Promise.resolve([]),
+    ]);
 
     const pdfParts = [...examParts, ...solutionParts];
 
