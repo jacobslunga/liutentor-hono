@@ -7,7 +7,8 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { stream } from "hono/streaming";
 import { supabase } from "~/db/supabase";
-import { streamGoogleResponse, PdfData } from "~/utils/chat.utils";
+import { streamGoogleResponse } from "~/utils/chat.utils";
+import { pdfToGeminiParts } from "~/utils/pdf.utils";
 import {
   getAuthenticatedUserId,
   assertConversationOwnership,
@@ -54,21 +55,6 @@ function logToDBAsync(payload: any) {
     .then(({ error }) => {
       if (error) console.error("DB Log Error:", error.message);
     });
-}
-
-async function fetchPdfAsBase64(url: string): Promise<string | null> {
-  try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      console.error(`Failed to fetch PDF at ${url}: ${response.statusText}`);
-      return null;
-    }
-    const arrayBuffer = await response.arrayBuffer();
-    return Buffer.from(arrayBuffer).toString("base64");
-  } catch (error) {
-    console.error(`Network error fetching PDF at ${url}:`, error);
-    return null;
-  }
 }
 
 const chat = new Hono().basePath("/v1/chat");
@@ -120,13 +106,13 @@ chat.post(
     const bold = "\x1b[1m";
     console.log(
       `${cyan}┌─ CHAT REQUEST ${"─".repeat(35)}\n` +
-      `│${reset}  ${bold}Course${reset}   ${dim}→${reset}  ${courseCode ?? "unknown"}\n` +
-      `${cyan}│${reset}  ${bold}Exam ID${reset}  ${dim}→${reset}  ${examId}\n` +
-      `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${resolvedModelId}  ${dim}(${provider})${reset}\n` +
-      `${cyan}│${reset}  ${bold}Messages${reset} ${dim}→${reset}  ${messages.length}\n` +
-      `${cyan}│${reset}  ${bold}Solution${reset} ${dim}→${reset}  ${solutionUrl ? "yes" : "no"}\n` +
-      `${cyan}│${reset}  ${bold}User${reset}     ${dim}→${reset}  ${dim}${userId ?? `anon:${anonymousUserId}`}${reset}\n` +
-      `${cyan}└${"─".repeat(50)}${reset}`,
+        `│${reset}  ${bold}Course${reset}   ${dim}→${reset}  ${courseCode ?? "unknown"}\n` +
+        `${cyan}│${reset}  ${bold}Exam ID${reset}  ${dim}→${reset}  ${examId}\n` +
+        `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${resolvedModelId}  ${dim}(${provider})${reset}\n` +
+        `${cyan}│${reset}  ${bold}Messages${reset} ${dim}→${reset}  ${messages.length}\n` +
+        `${cyan}│${reset}  ${bold}Solution${reset} ${dim}→${reset}  ${solutionUrl ? "yes" : "no"}\n` +
+        `${cyan}│${reset}  ${bold}User${reset}     ${dim}→${reset}  ${dim}${userId ?? `anon:${anonymousUserId}`}${reset}\n` +
+        `${cyan}└${"─".repeat(50)}${reset}`,
     );
 
     logToDBAsync({
@@ -140,26 +126,14 @@ chat.post(
       model: resolvedModelId,
     });
 
-    const [examBase64, solutionBase64] = await Promise.all([
-      fetchPdfAsBase64(examUrl),
-      solutionUrl ? fetchPdfAsBase64(solutionUrl) : Promise.resolve(null),
+    const [examParts, solutionParts] = await Promise.all([
+      pdfToGeminiParts(examUrl, "tenta"),
+      solutionUrl
+        ? pdfToGeminiParts(solutionUrl, "facit")
+        : Promise.resolve([]),
     ]);
 
-    const pdfs: PdfData[] = [];
-    if (examBase64) {
-      pdfs.push({
-        data: examBase64,
-        mimeType: "application/pdf",
-        label: "tenta",
-      });
-    }
-    if (solutionBase64) {
-      pdfs.push({
-        data: solutionBase64,
-        mimeType: "application/pdf",
-        label: "facit",
-      });
-    }
+    const pdfParts = [...examParts, ...solutionParts];
 
     const systemPrompt = SYSTEM_PROMPT;
 
@@ -167,7 +141,7 @@ chat.post(
       systemPrompt,
       messages,
       resolvedModelId,
-      pdfs,
+      pdfParts,
       lastMsgText,
       selectionContext,
     );

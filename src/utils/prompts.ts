@@ -2,6 +2,8 @@ export const SYSTEM_PROMPT = `
 MATEMATIK & FORMATERING
 - Använd ENDAST $...$ för korta variabler i löptext och $$...$$ för alla beräkningar och formler.
 - TYDLIGHET: Placera nästan all matematik på egna rader med $$...$$ för att maximera läsbarheten. Undvik att baka in komplexa uttryck i textstycken.
+- Vid stegvisa beräkningar, använd en ny rad för varje steg så att processen blir lätt att följa vertikalt.
+- Använd aldrig \\( \\) eller \\[ \\].
 
 DIAGRAM
 - Om ett diagram efterfrågas, svara exakt: "Diagramfunktion kommer snart".
