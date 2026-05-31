@@ -7,8 +7,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { stream } from "hono/streaming";
 import { supabase } from "~/db/supabase";
-import { streamGoogleResponse } from "~/utils/chat.utils";
-import { pdfToGeminiParts } from "~/utils/pdf.utils";
+import { streamGoogleResponse, PdfData } from "~/utils/chat.utils";
 import {
   getAuthenticatedUserId,
   assertConversationOwnership,
@@ -55,6 +54,21 @@ function logToDBAsync(payload: any) {
     .then(({ error }) => {
       if (error) console.error("DB Log Error:", error.message);
     });
+}
+
+async function fetchPdfAsBase64(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      console.error(`Failed to fetch PDF at ${url}: ${response.statusText}`);
+      return null;
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer).toString("base64");
+  } catch (error) {
+    console.error(`Network error fetching PDF at ${url}:`, error);
+    return null;
+  }
 }
 
 const chat = new Hono().basePath("/v1/chat");
@@ -126,17 +140,26 @@ chat.post(
       model: resolvedModelId,
     });
 
-    // Process both PDFs in parallel: the work is mostly network I/O, and
-    // sharp.concurrency(1) globally serializes the heavy image conversions, so
-    // peak memory stays bounded even when both take the image path.
-    const [examParts, solutionParts] = await Promise.all([
-      pdfToGeminiParts(examUrl, "tenta"),
-      solutionUrl
-        ? pdfToGeminiParts(solutionUrl, "facit")
-        : Promise.resolve([]),
+    const [examBase64, solutionBase64] = await Promise.all([
+      fetchPdfAsBase64(examUrl),
+      solutionUrl ? fetchPdfAsBase64(solutionUrl) : Promise.resolve(null),
     ]);
 
-    const pdfParts = [...examParts, ...solutionParts];
+    const pdfs: PdfData[] = [];
+    if (examBase64) {
+      pdfs.push({
+        data: examBase64,
+        mimeType: "application/pdf",
+        label: "tenta",
+      });
+    }
+    if (solutionBase64) {
+      pdfs.push({
+        data: solutionBase64,
+        mimeType: "application/pdf",
+        label: "facit",
+      });
+    }
 
     const systemPrompt = SYSTEM_PROMPT;
 
@@ -144,7 +167,7 @@ chat.post(
       systemPrompt,
       messages,
       resolvedModelId,
-      pdfParts,
+      pdfs,
       lastMsgText,
       selectionContext,
     );
