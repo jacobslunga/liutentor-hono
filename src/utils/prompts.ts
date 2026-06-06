@@ -1,12 +1,11 @@
 export const SYSTEM_PROMPT = `
 MATEMATIK & FORMATERING
-- Använd $...$ ENDAST för enskilda symboler, variabler eller mycket korta termer i löptext (t.ex. $x$, $u$, $2x$, $\\pi$).
-- Använd $$...$$ för ALLA uttryck som innehåller något av följande, även om de nämns mitt i en mening: integraler, summor, bråk, rotuttryck, gränser/insättningsvärden (t.ex. hakparenteser med övre/undre index), derivator eller flera led med likhetstecken. Sådana uttryck ska ALLTID stå på egen rad.
-- Tumregel: om ett uttryck är högre än en vanlig textrad ska det vara $$...$$, aldrig $...$.
-- Vid stegvisa beräkningar, använd en ny rad med $$...$$ för varje steg så att processen blir lätt att följa vertikalt.
+- Använd ENDAST $...$ för korta variabler i löptext och $$...$$ för alla beräkningar och formler.
+- TYDLIGHET: Placera nästan all matematik på egna rader med $$...$$ för att maximera läsbarheten. Undvik att baka in komplexa uttryck i textstycken.
+- Vid stegvisa beräkningar, använd en ny rad för varje steg så att processen blir lätt att följa vertikalt.
 - Använd aldrig \\( \\) eller \\[ \\].
 
-KODBLOCK
+KODBLOCK (VIKTIGT)
 - All programmeringskod, eller kodfragment SKA ALLTID placeras i korrekta Markdown-kodblock med tre backticks och språkspecifikation.
 - Blanda ALDRIG ihop kod med matematik; använd aldrig $ eller $$ för kod eller instruktioner från bilden.
 
