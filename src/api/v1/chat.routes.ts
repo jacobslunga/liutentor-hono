@@ -7,13 +7,13 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { stream } from "hono/streaming";
 import { supabase } from "~/db/supabase";
-import { streamGoogleResponse, PdfData } from "~/utils/chat.utils";
+import { streamAnthropicResponse, PdfData } from "~/utils/chat.utils";
 import {
   getAuthenticatedUserId,
   assertConversationOwnership,
 } from "~/utils/auth";
 
-type Provider = "google";
+type Provider = "anthropic";
 
 interface ModelConfig {
   provider: Provider;
@@ -21,20 +21,20 @@ interface ModelConfig {
 }
 
 const MODEL_MAP: Record<string, ModelConfig> = {
-  "gemini-3.1-flash-lite": {
-    provider: "google",
-    modelId: "gemini-3.1-flash-lite",
+  "claude-haiku-4-5": {
+    provider: "anthropic",
+    modelId: "claude-haiku-4-5",
   },
-  "gemini-3-flash-preview": {
-    provider: "google",
-    modelId: "gemini-3-flash-preview",
+  "claude-sonnet-4-6": {
+    provider: "anthropic",
+    modelId: "claude-sonnet-4-6",
   },
 };
 
 const getModelConfig = (modelId: string): ModelConfig =>
   MODEL_MAP[modelId] ?? {
-    provider: "google",
-    modelId: "gemini-3.1-flash-lite",
+    provider: "anthropic",
+    modelId: "claude-haiku-4-5",
   };
 
 function extractTextContent(content: unknown): string {
@@ -89,7 +89,7 @@ chat.post(
       solutionUrl,
       courseCode,
       conversationId,
-      modelId = "gemini-3.1-flash-lite",
+      modelId = "claude-haiku-4-5",
       selectionContext,
     } = body as any;
 
@@ -163,7 +163,7 @@ chat.post(
 
     const systemPrompt = SYSTEM_PROMPT;
 
-    const responseStream = streamGoogleResponse(
+    const responseStream = streamAnthropicResponse(
       systemPrompt,
       messages,
       resolvedModelId,

@@ -1,7 +1,5 @@
 export const SYSTEM_PROMPT = `
 MATEMATIK & FORMATERING
-- Inline-matte med $...$ för korta värden i meningar; sätt aldrig enskilda tal i $$...$$.
-- Större beräkningar och härledningar som fristående block, gärna med aligned-miljö för flerstegsräkningar.
 - Binära uppställningar och sanningstabeller gärna i kodblock (text) för perfekt kolumnjustering.
 KODBLOCK (VIKTIGT)
 - All programmeringskod, eller kodfragment SKA ALLTID placeras i korrekta Markdown-kodblock med tre backticks och språkspecifikation.

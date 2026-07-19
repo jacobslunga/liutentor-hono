@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import Anthropic from "@anthropic-ai/sdk";
 
 export interface PdfData {
   data: string;
@@ -12,11 +12,11 @@ function getPdfLabelText(label: "tenta" | "facit"): string {
     : "Bifogad PDF: facit. Använd endast som referens när användaren frågar om en specifik uppgift, och redovisa aldrig lösningar oombedd.";
 }
 
-const googleAI = new GoogleGenAI({
-  apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY || "",
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY || "",
 });
 
-async function* streamGoogleResponse(
+async function* streamAnthropicResponse(
   systemPrompt: string,
   messages: any[],
   modelId: string,
@@ -24,55 +24,75 @@ async function* streamGoogleResponse(
   lastMsgText: string,
   selectionContext?: string,
 ): AsyncGenerator<string> {
-  const history = messages
+  const history: Anthropic.MessageParam[] = messages
     .slice(0, -1)
     .map((message: any) => {
-      const role = message?.role === "assistant" ? "model" : "user";
+      const role: "user" | "assistant" =
+        message?.role === "assistant" ? "assistant" : "user";
       if (Array.isArray(message?.content)) {
-        return {
-          role,
-          parts: message.content
-            .filter(
-              (part: any) =>
-                part?.type === "text" && typeof part?.text === "string",
-            )
-            .map((part: any) => ({ text: part.text })),
-        };
+        const text = message.content
+          .filter(
+            (part: any) =>
+              part?.type === "text" && typeof part?.text === "string",
+          )
+          .map((part: any) => part.text)
+          .join("\n");
+        return { role, content: text };
       }
       return {
         role,
-        parts: [
-          { text: typeof message?.content === "string" ? message.content : "" },
-        ],
+        content: typeof message?.content === "string" ? message.content : "",
       };
     })
-    .filter((msg: any) => Array.isArray(msg.parts) && msg.parts.length > 0);
+    .filter((msg) => typeof msg.content === "string" && msg.content.length > 0);
 
-  const pdfParts = pdfs.flatMap((pdf) => [
-    { text: getPdfLabelText(pdf.label) },
-    { inlineData: { data: pdf.data, mimeType: pdf.mimeType } },
+  const pdfBlocks: Anthropic.ContentBlockParam[] = pdfs.flatMap((pdf) => [
+    { type: "text" as const, text: getPdfLabelText(pdf.label) },
+    {
+      type: "document" as const,
+      source: {
+        type: "base64" as const,
+        media_type: "application/pdf" as const,
+        data: pdf.data,
+      },
+    },
   ]);
 
   const lastMsgWithContext = selectionContext
     ? `[Användaren hänvisar till följande markerade text:\n"${selectionContext}"]\n\n${lastMsgText}`
     : lastMsgText;
 
-  const result = await googleAI.models.generateContentStream({
+  // Adaptive thinking exists on Claude 4.6+; Haiku 4.5 rejects it.
+  const supportsAdaptiveThinking = !modelId.startsWith("claude-haiku");
+
+  const stream = anthropic.messages.stream({
     model: modelId,
-    contents: [
+    max_tokens: 16000,
+    system: systemPrompt,
+    ...(supportsAdaptiveThinking
+      ? { thinking: { type: "adaptive" as const } }
+      : {}),
+    messages: [
       ...history,
       {
         role: "user",
-        parts: [...pdfParts, { text: lastMsgWithContext }],
+        content: [
+          ...pdfBlocks,
+          { type: "text", text: lastMsgWithContext },
+        ],
       },
     ],
-    config: { systemInstruction: systemPrompt },
   });
 
-  for await (const chunk of result) {
-    const text = chunk.text || "";
-    if (text) yield text;
+  for await (const event of stream) {
+    if (
+      event.type === "content_block_delta" &&
+      event.delta.type === "text_delta" &&
+      event.delta.text
+    ) {
+      yield event.delta.text;
+    }
   }
 }
 
-export { streamGoogleResponse };
+export { streamAnthropicResponse };

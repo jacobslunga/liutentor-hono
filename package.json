@@ -7,8 +7,7 @@
     "build": "bun build src/app.ts --outdir dist --target bun"
   },
   "dependencies": {
-    "@google/genai": "^1.45.0",
-    "@google/generative-ai": "^0.24.1",
+    "@anthropic-ai/sdk": "^0.112.3",
     "@hono/zod-validator": "^0.7.6",
     "@supabase/supabase-js": "^2.93.3",
     "ai": "^6.0.67",

@@ -17,12 +17,12 @@ import { rebalanceQuizAnswerDistribution } from "./quiz.utils";
 import { logQuizGeneration } from "./quiz.cache";
 import { getAuthenticatedUserId } from "~/utils/auth";
 
-import { GoogleGenAI } from "@google/genai";
+import Anthropic from "@anthropic-ai/sdk";
 
-const GEMINI_MODEL = "gemini-3.1-flash-lite";
+const QUIZ_MODEL = "claude-sonnet-4-6";
 
-const genai = new GoogleGenAI({
-  apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY || "",
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY || "",
 });
 
 const quiz = new Hono().basePath("/v1/quiz");
@@ -41,27 +41,45 @@ const multipleChoiceBodySchema = z.object({
 });
 
 const QUIZ_JSON_INSTRUCTION = `
-Du MÅSTE svara med ENBART giltig JSON som matchar denna exakta struktur, ingen markdown, ingen inledning, ingen förklaring:
-{
-  "quiz": {
-    "questions": [
-      {
-        "id": 1,
-        "question": "...",
-        "options": ["A", "B", "C", "D"],
-        "answer": 0
-      }
-    ]
-  }
-}
 Regler:
 - Generera exakt 10 frågor.
 - Varje fråga har exakt 4 svarsalternativ.
 - "answer" är det 0-baserade indexet för det korrekta alternativet (0, 1, 2 eller 3).
 - Alla frågor och svarsalternativ MÅSTE vara skrivna på svenska.
 - Om tentafrågorna är på engelska, översätt till svenska.
-- Svara med enbart rå JSON. Ingen wrapping, inga backticks, ingen extra text.
 `;
+
+const QUIZ_OUTPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    quiz: {
+      type: "object",
+      properties: {
+        questions: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "integer" },
+              question: { type: "string" },
+              options: {
+                type: "array",
+                items: { type: "string" },
+              },
+              answer: { type: "integer", enum: [0, 1, 2, 3] },
+            },
+            required: ["id", "question", "options", "answer"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["questions"],
+      additionalProperties: false,
+    },
+  },
+  required: ["quiz"],
+  additionalProperties: false,
+} as const;
 
 function shuffleArray<T>(items: T[]): T[] {
   const copy = [...items];
@@ -140,35 +158,41 @@ async function getExamSources(courseCode: string, examIds?: number[]) {
   return shuffled.slice(0, takeCount);
 }
 
-async function generateQuizFromGemini(
+async function generateQuizFromClaude(
   pdfs: { data: string; mimeType: string }[],
   promptText: string,
 ): Promise<MultipleChoiceQuiz> {
-  const pdfParts = pdfs.map((pdf) => ({
-    inlineData: {
-      mimeType: "application/pdf",
+  const pdfBlocks: Anthropic.ContentBlockParam[] = pdfs.map((pdf) => ({
+    type: "document" as const,
+    source: {
+      type: "base64" as const,
+      media_type: "application/pdf" as const,
       data: pdf.data,
     },
   }));
 
-  const response = await genai.models.generateContent({
-    model: GEMINI_MODEL,
-    contents: [
+  const response = await anthropic.messages.create({
+    model: QUIZ_MODEL,
+    max_tokens: 16000,
+    output_config: {
+      format: {
+        type: "json_schema",
+        schema: QUIZ_OUTPUT_SCHEMA,
+      },
+    },
+    messages: [
       {
         role: "user",
-        parts: [
-          ...pdfParts,
-          { text: QUIZ_JSON_INSTRUCTION + "\n\n" + promptText },
+        content: [
+          ...pdfBlocks,
+          { type: "text", text: QUIZ_JSON_INSTRUCTION + "\n\n" + promptText },
         ],
       },
     ],
-    config: {
-      responseMimeType: "application/json",
-    },
   });
 
-  const text = response.text ?? "";
-  if (!text) throw new Error("Gemini returned empty response");
+  const text = response.content.find((block) => block.type === "text")?.text ?? "";
+  if (!text) throw new Error("Claude returned empty response");
 
   return multipleChoiceQuizSchema.parse(JSON.parse(text));
 }
@@ -204,7 +228,7 @@ quiz.post(
       console.log(
         `${cyan}┌─ QUIZ REQUEST ${"─".repeat(35)}\n` +
         `│${reset}  ${bold}Course${reset}   ${dim}→${reset}  ${courseCode}\n` +
-        `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${GEMINI_MODEL}\n` +
+        `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${QUIZ_MODEL}\n` +
         `${cyan}│${reset}  ${bold}Exams${reset}    ${dim}→${reset}  ${examIds ? examIds.join(", ") : "random"}\n` +
         `${cyan}│${reset}  ${bold}Custom${reset}   ${dim}→${reset}  ${customPrompt ? `"${customPrompt.slice(0, 40)}${customPrompt.length > 40 ? "…" : ""}"` : "none"}\n` +
         `${cyan}│${reset}  ${bold}User${reset}     ${dim}→${reset}  ${dim}${userId ?? `anon:${anonymousUserId}`}${reset}\n` +
@@ -271,7 +295,7 @@ quiz.post(
           mimeType: "application/pdf" as const,
         }));
 
-        const parsed = await generateQuizFromGemini(pdfs, promptText);
+        const parsed = await generateQuizFromClaude(pdfs, promptText);
         const normalizedQuiz = multipleChoiceQuizSchema.parse(
           rebalanceQuizAnswerDistribution(parsed),
         );
@@ -291,7 +315,7 @@ quiz.post(
           quiz: normalizedQuiz,
           source_exam_ids: sourceExamIds,
           source_count: validExams.length,
-          model: GEMINI_MODEL,
+          model: QUIZ_MODEL,
         });
 
         await sendEvent("result", {
@@ -300,7 +324,7 @@ quiz.post(
             courseCode,
             sourceExamIds,
             sourceCount: validExams.length,
-            model: GEMINI_MODEL,
+            model: QUIZ_MODEL,
           },
         });
       } catch (error: any) {
