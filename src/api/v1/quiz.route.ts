@@ -19,7 +19,7 @@ import { getAuthenticatedUserId } from "~/utils/auth";
 
 import Anthropic from "@anthropic-ai/sdk";
 
-const QUIZ_MODEL = "claude-sonnet-4-6";
+const QUIZ_MODEL = "claude-haiku-4-5";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || "",

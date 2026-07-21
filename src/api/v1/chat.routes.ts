@@ -1,4 +1,8 @@
-import { SYSTEM_PROMPT } from "~/utils/prompts";
+import {
+  SYSTEM_PROMPT,
+  DIRECT_ANSWER_PROMPT,
+  HINT_MODE_PROMPT,
+} from "~/utils/prompts";
 import { chatMessageSchema, examIdSchema } from "./chat.schemas";
 import { bodyLimit } from "hono/body-limit";
 import { timeout } from "hono/timeout";
@@ -91,6 +95,7 @@ chat.post(
       conversationId,
       modelId = "claude-haiku-4-5",
       selectionContext,
+      giveDirectAnswer = true,
     } = body as any;
 
     if (!examUrl || !messages?.length) {
@@ -125,6 +130,7 @@ chat.post(
         `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${resolvedModelId}  ${dim}(${provider})${reset}\n` +
         `${cyan}│${reset}  ${bold}Messages${reset} ${dim}→${reset}  ${messages.length}\n` +
         `${cyan}│${reset}  ${bold}Solution${reset} ${dim}→${reset}  ${solutionUrl ? "yes" : "no"}\n` +
+        `${cyan}│${reset}  ${bold}Mode${reset}     ${dim}→${reset}  ${giveDirectAnswer ? "direct" : "hint"}\n` +
         `${cyan}│${reset}  ${bold}User${reset}     ${dim}→${reset}  ${dim}${userId ?? `anon:${anonymousUserId}`}${reset}\n` +
         `${cyan}└${"─".repeat(50)}${reset}`,
     );
@@ -161,7 +167,9 @@ chat.post(
       });
     }
 
-    const systemPrompt = SYSTEM_PROMPT;
+    const systemPrompt = `${SYSTEM_PROMPT}\n\n${
+      giveDirectAnswer ? DIRECT_ANSWER_PROMPT : HINT_MODE_PROMPT
+    }`;
 
     const responseStream = streamAnthropicResponse(
       systemPrompt,
