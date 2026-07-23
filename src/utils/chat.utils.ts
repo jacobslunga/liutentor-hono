@@ -46,21 +46,49 @@ async function* streamAnthropicResponse(
     })
     .filter((msg) => typeof msg.content === "string" && msg.content.length > 0);
 
-  const pdfBlocks: Anthropic.ContentBlockParam[] = pdfs.flatMap((pdf) => [
-    { type: "text" as const, text: getPdfLabelText(pdf.label) },
-    {
-      type: "document" as const,
-      source: {
-        type: "base64" as const,
-        media_type: "application/pdf" as const,
-        data: pdf.data,
-      },
-    },
-  ]);
-
   const lastMsgWithContext = selectionContext
     ? `[Användaren hänvisar till följande markerade text:\n"${selectionContext}"]\n\n${lastMsgText}`
     : lastMsgText;
+
+  const conversationMessages: Anthropic.MessageParam[] = [
+    ...history,
+    { role: "user", content: lastMsgWithContext },
+  ];
+
+  let requestMessages = conversationMessages;
+
+  if (pdfs.length > 0) {
+    const pdfBlocks: Anthropic.ContentBlockParam[] = pdfs.flatMap((pdf) => [
+      { type: "text" as const, text: getPdfLabelText(pdf.label) },
+      {
+        type: "document" as const,
+        source: {
+          type: "base64" as const,
+          media_type: "application/pdf" as const,
+          data: pdf.data,
+        },
+      },
+    ]);
+    // Mark the end of the PDF group as a cache breakpoint so it's billed at
+    // full price only on the first request; every later request in this
+    // window (1h) — this conversation or any other one for the same exam —
+    // reuses the cached read at a fraction of the cost. The PDF sits in a
+    // fixed opening exchange rather than the current turn, so this prefix
+    // stays byte-identical (and cache-eligible) no matter how long the
+    // actual conversation grows.
+    (pdfBlocks[pdfBlocks.length - 1] as any).cache_control = {
+      type: "ephemeral",
+      ttl: "1h",
+    };
+    requestMessages = [
+      { role: "user", content: pdfBlocks },
+      {
+        role: "assistant",
+        content: "Jag har läst igenom de bifogade filerna.",
+      },
+      ...conversationMessages,
+    ];
+  }
 
   // Adaptive thinking exists on Claude 4.6+; Haiku 4.5 rejects it.
   const supportsAdaptiveThinking = !modelId.startsWith("claude-haiku");
@@ -68,20 +96,19 @@ async function* streamAnthropicResponse(
   const stream = anthropic.messages.stream({
     model: modelId,
     max_tokens: 16000,
-    system: systemPrompt,
+    system: [
+      {
+        type: "text",
+        text: systemPrompt,
+        // Must be >= the ttl on any cache_control block later in the request
+        // (Anthropic requires non-decreasing TTLs across tools/system/messages).
+        cache_control: { type: "ephemeral", ttl: "1h" },
+      },
+    ],
     ...(supportsAdaptiveThinking
       ? { thinking: { type: "adaptive" as const } }
       : {}),
-    messages: [
-      ...history,
-      {
-        role: "user",
-        content: [
-          ...pdfBlocks,
-          { type: "text", text: lastMsgWithContext },
-        ],
-      },
-    ],
+    messages: requestMessages,
   });
 
   for await (const event of stream) {
