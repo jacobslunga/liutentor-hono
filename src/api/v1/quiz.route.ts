@@ -17,12 +17,12 @@ import { rebalanceQuizAnswerDistribution } from "./quiz.utils";
 import { logQuizGeneration } from "./quiz.cache";
 import { getAuthenticatedUserId } from "~/utils/auth";
 
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI, Type } from "@google/genai";
 
-const QUIZ_MODEL = "claude-haiku-4-5";
+const QUIZ_MODEL = "gemini-3.1-flash-lite";
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || "",
+const googleAi = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "",
 });
 
 const quiz = new Hono().basePath("/v1/quiz");
@@ -158,41 +158,65 @@ async function getExamSources(courseCode: string, examIds?: number[]) {
   return shuffled.slice(0, takeCount);
 }
 
-async function generateQuizFromClaude(
+async function generateQuizFromGemini(
   pdfs: { data: string; mimeType: string }[],
   promptText: string,
 ): Promise<MultipleChoiceQuiz> {
-  const pdfBlocks: Anthropic.ContentBlockParam[] = pdfs.map((pdf) => ({
-    type: "document" as const,
-    source: {
-      type: "base64" as const,
-      media_type: "application/pdf" as const,
-      data: pdf.data,
-    },
-  }));
-
-  const response = await anthropic.messages.create({
-    model: QUIZ_MODEL,
-    max_tokens: 16000,
-    output_config: {
-      format: {
-        type: "json_schema",
-        schema: QUIZ_OUTPUT_SCHEMA,
+  const pdfParts = pdfs.flatMap((pdf) => [
+    {
+      inlineData: {
+        mimeType: pdf.mimeType,
+        data: pdf.data,
       },
     },
-    messages: [
+  ]);
+
+  const response = await googleAi.models.generateContent({
+    model: QUIZ_MODEL,
+    contents: [
       {
         role: "user",
-        content: [
-          ...pdfBlocks,
-          { type: "text", text: QUIZ_JSON_INSTRUCTION + "\n\n" + promptText },
+        parts: [
+          ...pdfParts,
+          { text: QUIZ_JSON_INSTRUCTION + "\n\n" + promptText },
         ],
       },
     ],
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          quiz: {
+            type: Type.OBJECT,
+            properties: {
+              questions: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    id: { type: Type.INTEGER },
+                    question: { type: Type.STRING },
+                    options: {
+                      type: Type.ARRAY,
+                      items: { type: Type.STRING },
+                    },
+                    answer: { type: Type.INTEGER },
+                  },
+                  required: ["id", "question", "options", "answer"],
+                },
+              },
+            },
+            required: ["questions"],
+          },
+        },
+        required: ["quiz"],
+      },
+    },
   });
 
-  const text = response.content.find((block) => block.type === "text")?.text ?? "";
-  if (!text) throw new Error("Claude returned empty response");
+  const text = response.text ?? "";
+  if (!text) throw new Error("Gemini returned empty response");
 
   return multipleChoiceQuizSchema.parse(JSON.parse(text));
 }
@@ -295,7 +319,7 @@ quiz.post(
           mimeType: "application/pdf" as const,
         }));
 
-        const parsed = await generateQuizFromClaude(pdfs, promptText);
+        const parsed = await generateQuizFromGemini(pdfs, promptText);
         const normalizedQuiz = multipleChoiceQuizSchema.parse(
           rebalanceQuizAnswerDistribution(parsed),
         );

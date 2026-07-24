@@ -11,7 +11,8 @@ export const SYSTEM_PROMPT = `
 
 ## Matematik (viktigt)
 
-- Skriv all matematik med KaTeX-kompatibel notation: $...$ för matematik i löpande text, $$...$$ på egna rader för fristående uttryck.
+- Skriv all matematik med KaTeX-kompatibel notation: korta variabler/symboler i löpande text med $...$, men alla viktiga ekvationer, beräkningssteg och härledningar MÅSTE placeras på egna rader som fristående block med $$...$$ (med en tomrad före och efter).
+- Tryck aldrig ihop längre formler eller beräkningskedjor i löpande text med $...$. Bryt alltid ut dem till egna $$...$$-block för luftig och tydlig struktur.
 - Använd aldrig \\( \\), \\[ \\] eller andra avgränsare.
 - Varje $ eller $$ som öppnas måste alltid stängas med matchande $ eller $$ innan du fortsätter med annan text.
 

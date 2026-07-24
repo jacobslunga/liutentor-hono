@@ -1,4 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI } from "@google/genai";
+import { LRUCache } from "lru-cache";
 
 export interface PdfData {
   data: string;
@@ -14,6 +16,15 @@ function getPdfLabelText(label: "tenta" | "facit"): string {
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || "",
+});
+
+const googleAi = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "",
+});
+
+const geminiCacheStore = new LRUCache<string, string>({
+  max: 100,
+  ttl: 55 * 60 * 1000,
 });
 
 async function* streamAnthropicResponse(
@@ -69,13 +80,6 @@ async function* streamAnthropicResponse(
         },
       },
     ]);
-    // Mark the end of the PDF group as a cache breakpoint so it's billed at
-    // full price only on the first request; every later request in this
-    // window (1h) — this conversation or any other one for the same exam —
-    // reuses the cached read at a fraction of the cost. The PDF sits in a
-    // fixed opening exchange rather than the current turn, so this prefix
-    // stays byte-identical (and cache-eligible) no matter how long the
-    // actual conversation grows.
     (pdfBlocks[pdfBlocks.length - 1] as any).cache_control = {
       type: "ephemeral",
       ttl: "1h",
@@ -90,7 +94,6 @@ async function* streamAnthropicResponse(
     ];
   }
 
-  // Adaptive thinking exists on Claude 4.6+; Haiku 4.5 rejects it.
   const supportsAdaptiveThinking = !modelId.startsWith("claude-haiku");
 
   const stream = anthropic.messages.stream({
@@ -100,8 +103,6 @@ async function* streamAnthropicResponse(
       {
         type: "text",
         text: systemPrompt,
-        // Must be >= the ttl on any cache_control block later in the request
-        // (Anthropic requires non-decreasing TTLs across tools/system/messages).
         cache_control: { type: "ephemeral", ttl: "1h" },
       },
     ],
@@ -122,4 +123,136 @@ async function* streamAnthropicResponse(
   }
 }
 
-export { streamAnthropicResponse };
+async function* streamGeminiResponse(
+  systemPrompt: string,
+  messages: any[],
+  modelId: string,
+  pdfs: PdfData[],
+  lastMsgText: string,
+  selectionContext?: string,
+  cacheKey?: string,
+): AsyncGenerator<string> {
+  const history = messages
+    .slice(0, -1)
+    .map((message: any) => {
+      const role = message?.role === "assistant" ? "model" : "user";
+      let text = "";
+      if (Array.isArray(message?.content)) {
+        text = message.content
+          .filter(
+            (part: any) =>
+              part?.type === "text" && typeof part?.text === "string",
+          )
+          .map((part: any) => part.text)
+          .join("\n");
+      } else if (typeof message?.content === "string") {
+        text = message.content;
+      }
+      return {
+        role,
+        parts: [{ text }],
+      };
+    })
+    .filter((msg) => msg.parts[0]?.text.length > 0);
+
+  const lastMsgWithContext = selectionContext
+    ? `[Användaren hänvisar till följande markerade text:\n"${selectionContext}"]\n\n${lastMsgText}`
+    : lastMsgText;
+
+  const lastUserTurn = {
+    role: "user",
+    parts: [{ text: lastMsgWithContext }],
+  };
+
+  let cachedContentName: string | undefined = undefined;
+
+  if (pdfs.length > 0 && cacheKey) {
+    const fullCacheKey = `${modelId}:${cacheKey}`;
+    const cached = geminiCacheStore.get(fullCacheKey);
+    if (cached) {
+      cachedContentName = cached;
+    } else {
+      try {
+        const pdfParts = pdfs.flatMap((pdf) => [
+          { text: getPdfLabelText(pdf.label) },
+          {
+            inlineData: {
+              mimeType: pdf.mimeType,
+              data: pdf.data,
+            },
+          },
+        ]);
+        const createdCache = await googleAi.caches.create({
+          model: modelId,
+          contents: [
+            {
+              role: "user",
+              parts: pdfParts,
+            },
+          ],
+          config: {
+            systemInstruction: systemPrompt,
+            contents: [
+              {
+                role: "user",
+                parts: pdfParts,
+              },
+            ],
+            ttl: "3600s",
+          },
+        });
+        if (createdCache?.name) {
+          cachedContentName = createdCache.name;
+          geminiCacheStore.set(fullCacheKey, cachedContentName);
+        }
+      } catch (err: any) {
+        console.debug("Gemini context caching fallback:", err?.message || err);
+      }
+    }
+  }
+
+  let contents: any[] = [];
+  if (!cachedContentName && pdfs.length > 0) {
+    const pdfParts = pdfs.flatMap((pdf) => [
+      { text: getPdfLabelText(pdf.label) },
+      {
+        inlineData: {
+          mimeType: pdf.mimeType,
+          data: pdf.data,
+        },
+      },
+    ]);
+    contents = [
+      {
+        role: "user",
+        parts: pdfParts,
+      },
+      {
+        role: "model",
+        parts: [{ text: "Jag har läst igenom de bifogade filerna." }],
+      },
+      ...history,
+      lastUserTurn,
+    ];
+  } else {
+    contents = [...history, lastUserTurn];
+  }
+
+  const responseStream = await googleAi.models.generateContentStream({
+    model: modelId,
+    contents,
+    config: {
+      ...(cachedContentName
+        ? { cachedContent: cachedContentName }
+        : { systemInstruction: systemPrompt }),
+    },
+  });
+
+  for await (const chunk of responseStream) {
+    if (chunk.text) {
+      yield chunk.text;
+    }
+  }
+}
+
+export { streamAnthropicResponse, streamGeminiResponse };

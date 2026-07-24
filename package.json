@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.3",
+    "@google/genai": "^2.13.0",
     "@hono/zod-validator": "^0.7.6",
     "@supabase/supabase-js": "^2.93.3",
     "ai": "^6.0.67",

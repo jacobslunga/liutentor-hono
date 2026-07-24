@@ -11,13 +11,17 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { stream } from "hono/streaming";
 import { supabase } from "~/db/supabase";
-import { streamAnthropicResponse, PdfData } from "~/utils/chat.utils";
+import {
+  streamAnthropicResponse,
+  streamGeminiResponse,
+  PdfData,
+} from "~/utils/chat.utils";
 import {
   getAuthenticatedUserId,
   assertConversationOwnership,
 } from "~/utils/auth";
 
-type Provider = "anthropic";
+type Provider = "anthropic" | "google";
 
 interface ModelConfig {
   provider: Provider;
@@ -25,6 +29,14 @@ interface ModelConfig {
 }
 
 const MODEL_MAP: Record<string, ModelConfig> = {
+  "gemini-3.1-flash-lite": {
+    provider: "google",
+    modelId: "gemini-3.1-flash-lite",
+  },
+  "gemini-3.6-flash": {
+    provider: "google",
+    modelId: "gemini-3.6-flash",
+  },
   "claude-haiku-4-5": {
     provider: "anthropic",
     modelId: "claude-haiku-4-5",
@@ -37,8 +49,8 @@ const MODEL_MAP: Record<string, ModelConfig> = {
 
 const getModelConfig = (modelId: string): ModelConfig =>
   MODEL_MAP[modelId] ?? {
-    provider: "anthropic",
-    modelId: "claude-haiku-4-5",
+    provider: "google",
+    modelId: "gemini-3.1-flash-lite",
   };
 
 function extractTextContent(content: unknown): string {
@@ -93,7 +105,7 @@ chat.post(
       solutionUrl,
       courseCode,
       conversationId,
-      modelId = "claude-haiku-4-5",
+      modelId = "gemini-3.1-flash-lite",
       selectionContext,
       giveDirectAnswer = true,
     } = body as any;
@@ -171,14 +183,27 @@ chat.post(
       giveDirectAnswer ? DIRECT_ANSWER_PROMPT : HINT_MODE_PROMPT
     }`;
 
-    const responseStream = streamAnthropicResponse(
-      systemPrompt,
-      messages,
-      resolvedModelId,
-      pdfs,
-      lastMsgText,
-      selectionContext,
-    );
+    const cacheKey = `${examUrl}:${solutionUrl || ""}`;
+
+    const responseStream =
+      provider === "google"
+        ? streamGeminiResponse(
+            systemPrompt,
+            messages,
+            resolvedModelId,
+            pdfs,
+            lastMsgText,
+            selectionContext,
+            cacheKey,
+          )
+        : streamAnthropicResponse(
+            systemPrompt,
+            messages,
+            resolvedModelId,
+            pdfs,
+            lastMsgText,
+            selectionContext,
+          );
 
     return stream(c, async (s) => {
       c.header("Content-Type", "text/plain; charset=utf-8");
