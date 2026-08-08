@@ -58,8 +58,8 @@ async function* streamAnthropicResponse(
     .filter((msg) => typeof msg.content === "string" && msg.content.length > 0);
 
   const lastMsgWithContext = selectionContext
-    ? `[Användaren hänvisar till följande markerade text:\n"${selectionContext}"]\n\n${lastMsgText}`
-    : lastMsgText;
+    ? `[Användaren hänvisar till följande markerade text:\n"${selectionContext}"]\n\nAnvändarens fråga: ${lastMsgText}`
+    : `Användarens fråga: ${lastMsgText}`;
 
   const conversationMessages: Anthropic.MessageParam[] = [
     ...history,
@@ -156,8 +156,8 @@ async function* streamGeminiResponse(
     .filter((msg) => msg.parts[0]?.text.length > 0);
 
   const lastMsgWithContext = selectionContext
-    ? `[Användaren hänvisar till följande markerade text:\n"${selectionContext}"]\n\n${lastMsgText}`
-    : lastMsgText;
+    ? `[Användaren hänvisar till följande markerade text:\n"${selectionContext}"]\n\nAnvändarens fråga: ${lastMsgText}`
+    : `Användarens fråga: ${lastMsgText}`;
 
   const lastUserTurn = {
     role: "user",
