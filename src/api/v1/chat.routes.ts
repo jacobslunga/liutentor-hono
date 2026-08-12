@@ -14,44 +14,14 @@ import { supabase } from "~/db/supabase";
 import {
   streamAnthropicResponse,
   streamGeminiResponse,
+  streamOpenAIResponse,
   PdfData,
 } from "~/utils/chat.utils";
+import { getModelConfig } from "./chat.models";
 import {
   getAuthenticatedUserId,
   assertConversationOwnership,
 } from "~/utils/auth";
-
-type Provider = "anthropic" | "google";
-
-interface ModelConfig {
-  provider: Provider;
-  modelId: string;
-}
-
-const MODEL_MAP: Record<string, ModelConfig> = {
-  "gemini-3.1-flash-lite": {
-    provider: "google",
-    modelId: "gemini-3.1-flash-lite",
-  },
-  "gemini-3.6-flash": {
-    provider: "google",
-    modelId: "gemini-3.6-flash",
-  },
-  "claude-haiku-4-5": {
-    provider: "anthropic",
-    modelId: "claude-haiku-4-5",
-  },
-  "claude-sonnet-4-6": {
-    provider: "anthropic",
-    modelId: "claude-sonnet-4-6",
-  },
-};
-
-const getModelConfig = (modelId: string): ModelConfig =>
-  MODEL_MAP[modelId] ?? {
-    provider: "google",
-    modelId: "gemini-3.1-flash-lite",
-  };
 
 function extractTextContent(content: unknown): string {
   if (Array.isArray(content)) {
@@ -105,7 +75,7 @@ chat.post(
       solutionUrl,
       courseCode,
       conversationId,
-      modelId = "gemini-3.1-flash-lite",
+      modelId,
       selectionContext,
       giveDirectAnswer = true,
     } = body as any;
@@ -196,14 +166,23 @@ chat.post(
             selectionContext,
             cacheKey,
           )
-        : streamAnthropicResponse(
-            systemPrompt,
-            messages,
-            resolvedModelId,
-            pdfs,
-            lastMsgText,
-            selectionContext,
-          );
+        : provider === "anthropic"
+          ? streamAnthropicResponse(
+              systemPrompt,
+              messages,
+              resolvedModelId,
+              pdfs,
+              lastMsgText,
+              selectionContext,
+            )
+          : streamOpenAIResponse(
+              systemPrompt,
+              messages,
+              resolvedModelId,
+              pdfs,
+              lastMsgText,
+              selectionContext,
+            );
 
     return stream(c, async (s) => {
       c.header("Content-Type", "text/plain; charset=utf-8");

@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenAI } from "@google/genai";
 import { LRUCache } from "lru-cache";
+import OpenAI from "openai";
+import type { ResponseInput } from "openai/resources/responses/responses";
 
 export interface PdfData {
   data: string;
@@ -20,6 +22,10 @@ const anthropic = new Anthropic({
 
 const googleAi = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "",
+});
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY || "",
 });
 
 const geminiCacheStore = new LRUCache<string, string>({
@@ -255,4 +261,97 @@ async function* streamGeminiResponse(
   }
 }
 
-export { streamAnthropicResponse, streamGeminiResponse };
+export function buildOpenAIInput(
+  messages: any[],
+  pdfs: PdfData[],
+  lastMsgText: string,
+  selectionContext?: string,
+): ResponseInput {
+  const history: ResponseInput = messages
+    .slice(0, -1)
+    .map((message: any) => {
+      const role = message?.role === "assistant" ? "assistant" : "user";
+      let content = "";
+
+      if (Array.isArray(message?.content)) {
+        content = message.content
+          .filter(
+            (part: any) =>
+              part?.type === "text" && typeof part?.text === "string",
+          )
+          .map((part: any) => part.text)
+          .join("\n");
+      } else if (typeof message?.content === "string") {
+        content = message.content;
+      }
+
+      return { role, content };
+    })
+    .filter(
+      (message) =>
+        typeof message.content === "string" && message.content.length > 0,
+    );
+
+  const lastMsgWithContext = selectionContext
+    ? `[Användaren hänvisar till följande markerade text:\n"${selectionContext}"]\n\nAnvändarens fråga: ${lastMsgText}`
+    : `Användarens fråga: ${lastMsgText}`;
+
+  const conversationMessages: ResponseInput = [
+    ...history,
+    { role: "user", content: lastMsgWithContext },
+  ];
+
+  if (pdfs.length === 0) return conversationMessages;
+
+  return [
+    {
+      role: "user",
+      content: pdfs.flatMap((pdf) => [
+        { type: "input_text" as const, text: getPdfLabelText(pdf.label) },
+        {
+          type: "input_file" as const,
+          filename: `${pdf.label}.pdf`,
+          file_data: `data:${pdf.mimeType};base64,${pdf.data}`,
+          detail: "auto" as const,
+        },
+      ]),
+    },
+    {
+      role: "assistant",
+      content: "Jag har läst igenom de bifogade filerna.",
+    },
+    ...conversationMessages,
+  ];
+}
+
+async function* streamOpenAIResponse(
+  systemPrompt: string,
+  messages: any[],
+  modelId: string,
+  pdfs: PdfData[],
+  lastMsgText: string,
+  selectionContext?: string,
+  client: Pick<OpenAI, "responses"> = openai,
+): AsyncGenerator<string> {
+  const responseStream = await client.responses.create({
+    model: modelId,
+    instructions: systemPrompt,
+    input: buildOpenAIInput(messages, pdfs, lastMsgText, selectionContext),
+    max_output_tokens: 16000,
+    reasoning: { effort: "low" },
+    store: false,
+    stream: true,
+  });
+
+  for await (const event of responseStream) {
+    if (event.type === "response.output_text.delta" && event.delta) {
+      yield event.delta;
+    }
+  }
+}
+
+export {
+  streamAnthropicResponse,
+  streamGeminiResponse,
+  streamOpenAIResponse,
+};

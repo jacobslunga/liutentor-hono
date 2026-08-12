@@ -81,6 +81,7 @@ SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_KEY=your-service-key
 UPSTASH_REDIS_REST_URL=https://your-redis.upstash.io
 UPSTASH_REDIS_REST_TOKEN=your-redis-token
+OPENAI_API_KEY=your-openai-api-key
 ```
 
 ## Installation
