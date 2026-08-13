@@ -17,12 +17,12 @@ import { rebalanceQuizAnswerDistribution } from "./quiz.utils";
 import { logQuizGeneration } from "./quiz.cache";
 import { getAuthenticatedUserId } from "~/utils/auth";
 
-import { GoogleGenAI, Type } from "@google/genai";
+import OpenAI from "openai";
 
-const QUIZ_MODEL = "gemini-3.1-flash-lite";
+const QUIZ_MODEL = "gpt-5.6-luna";
 
-const googleAi = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "",
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY || "",
 });
 
 const quiz = new Hono().basePath("/v1/quiz");
@@ -158,65 +158,43 @@ async function getExamSources(courseCode: string, examIds?: number[]) {
   return shuffled.slice(0, takeCount);
 }
 
-async function generateQuizFromGemini(
+async function generateQuizFromOpenAI(
   pdfs: { data: string; mimeType: string }[],
   promptText: string,
 ): Promise<MultipleChoiceQuiz> {
-  const pdfParts = pdfs.flatMap((pdf) => [
-    {
-      inlineData: {
-        mimeType: pdf.mimeType,
-        data: pdf.data,
-      },
-    },
-  ]);
-
-  const response = await googleAi.models.generateContent({
+  const response = await openai.responses.create({
     model: QUIZ_MODEL,
-    contents: [
+    input: [
       {
         role: "user",
-        parts: [
-          ...pdfParts,
-          { text: QUIZ_JSON_INSTRUCTION + "\n\n" + promptText },
+        content: [
+          ...pdfs.map((pdf, index) => ({
+            type: "input_file" as const,
+            filename: `tenta-${index + 1}.pdf`,
+            file_data: `data:${pdf.mimeType};base64,${pdf.data}`,
+          })),
+          {
+            type: "input_text" as const,
+            text: QUIZ_JSON_INSTRUCTION + "\n\n" + promptText,
+          },
         ],
       },
     ],
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          quiz: {
-            type: Type.OBJECT,
-            properties: {
-              questions: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    id: { type: Type.INTEGER },
-                    question: { type: Type.STRING },
-                    options: {
-                      type: Type.ARRAY,
-                      items: { type: Type.STRING },
-                    },
-                    answer: { type: Type.INTEGER },
-                  },
-                  required: ["id", "question", "options", "answer"],
-                },
-              },
-            },
-            required: ["questions"],
-          },
-        },
-        required: ["quiz"],
+    text: {
+      format: {
+        type: "json_schema",
+        name: "multiple_choice_quiz",
+        schema: QUIZ_OUTPUT_SCHEMA,
+        strict: true,
       },
     },
+    reasoning: { effort: "low" },
+    max_output_tokens: 8000,
+    store: false,
   });
 
-  const text = response.text ?? "";
-  if (!text) throw new Error("Gemini returned empty response");
+  const text = response.output_text;
+  if (!text) throw new Error("OpenAI returned empty response");
 
   return multipleChoiceQuizSchema.parse(JSON.parse(text));
 }
@@ -319,7 +297,7 @@ quiz.post(
           mimeType: "application/pdf" as const,
         }));
 
-        const parsed = await generateQuizFromGemini(pdfs, promptText);
+        const parsed = await generateQuizFromOpenAI(pdfs, promptText);
         const normalizedQuiz = multipleChoiceQuizSchema.parse(
           rebalanceQuizAnswerDistribution(parsed),
         );
