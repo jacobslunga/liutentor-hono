@@ -1,9 +1,6 @@
-import {
-  SYSTEM_PROMPT,
-  DIRECT_ANSWER_PROMPT,
-  HINT_MODE_PROMPT,
-} from "~/utils/prompts";
+import { SYSTEM_PROMPT } from "~/utils/prompts";
 import { chatMessageSchema, examIdSchema } from "./chat.schemas";
+import { validateChatAttachments } from "./chat.attachments";
 import { bodyLimit } from "hono/body-limit";
 import { timeout } from "hono/timeout";
 import { zValidator } from "@hono/zod-validator";
@@ -62,12 +59,52 @@ const chat = new Hono().basePath("/v1/chat");
 chat.post(
   "/completion/:examId",
   zValidator("param", examIdSchema),
-  zValidator("json", chatMessageSchema),
-  bodyLimit({ maxSize: 20 * 1024 * 1024 }),
+  bodyLimit({ maxSize: 22 * 1024 * 1024 }),
   timeout(120000),
   async (c) => {
     const { examId } = c.req.valid("param");
-    const body = c.req.valid("json");
+    const contentType = c.req.header("content-type") ?? "";
+    if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
+      throw new HTTPException(415, {
+        message: "Chat requests must use multipart/form-data",
+      });
+    }
+
+    let formData: FormData;
+    try {
+      formData = await c.req.formData();
+    } catch {
+      throw new HTTPException(400, { message: "Malformed multipart request" });
+    }
+
+    const payload = formData.get("payload");
+    if (typeof payload !== "string") {
+      throw new HTTPException(400, { message: "Missing chat payload" });
+    }
+
+    let parsedPayload: unknown;
+    try {
+      parsedPayload = JSON.parse(payload);
+    } catch {
+      throw new HTTPException(400, { message: "Invalid chat payload" });
+    }
+
+    const validation = chatMessageSchema.safeParse(parsedPayload);
+    if (!validation.success) {
+      throw new HTTPException(400, {
+        message: validation.error.issues[0]?.message ?? "Invalid chat payload",
+      });
+    }
+
+    const fileFields = formData
+      .getAll("files")
+      .filter((field): field is File => field instanceof File);
+    if (fileFields.length !== formData.getAll("files").length) {
+      throw new HTTPException(400, { message: "Invalid attachment field" });
+    }
+
+    const userAttachments = await validateChatAttachments(fileFields);
+    const body = validation.data;
 
     const {
       messages,
@@ -77,8 +114,7 @@ chat.post(
       conversationId,
       modelId,
       selectionContext,
-      giveDirectAnswer = true,
-    } = body as any;
+    } = body;
 
     if (!examUrl || !messages?.length) {
       throw new HTTPException(400, { message: "Missing examUrl or messages" });
@@ -112,7 +148,7 @@ chat.post(
         `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${resolvedModelId}  ${dim}(${provider})${reset}\n` +
         `${cyan}│${reset}  ${bold}Messages${reset} ${dim}→${reset}  ${messages.length}\n` +
         `${cyan}│${reset}  ${bold}Solution${reset} ${dim}→${reset}  ${solutionUrl ? "yes" : "no"}\n` +
-        `${cyan}│${reset}  ${bold}Mode${reset}     ${dim}→${reset}  ${giveDirectAnswer ? "direct" : "hint"}\n` +
+        `${cyan}│${reset}  ${bold}Files${reset}    ${dim}→${reset}  ${userAttachments.length}\n` +
         `${cyan}│${reset}  ${bold}User${reset}     ${dim}→${reset}  ${dim}${userId ?? `anon:${anonymousUserId}`}${reset}\n` +
         `${cyan}└${"─".repeat(50)}${reset}`,
     );
@@ -149,9 +185,11 @@ chat.post(
       });
     }
 
-    const systemPrompt = `${SYSTEM_PROMPT}\n\n${
-      giveDirectAnswer ? DIRECT_ANSWER_PROMPT : HINT_MODE_PROMPT
-    }`;
+    const systemPrompt = SYSTEM_PROMPT;
+
+    const modelLastMsgText =
+      lastMsgText.trim() ||
+      "Hjälp mig att förstå och arbeta med det bifogade materialet.";
 
     const cacheKey = `${examUrl}:${solutionUrl || ""}`;
 
@@ -162,7 +200,8 @@ chat.post(
             messages,
             resolvedModelId,
             pdfs,
-            lastMsgText,
+            userAttachments,
+            modelLastMsgText,
             selectionContext,
             cacheKey,
           )
@@ -172,7 +211,8 @@ chat.post(
               messages,
               resolvedModelId,
               pdfs,
-              lastMsgText,
+              userAttachments,
+              modelLastMsgText,
               selectionContext,
             )
           : streamOpenAIResponse(
@@ -180,7 +220,8 @@ chat.post(
               messages,
               resolvedModelId,
               pdfs,
-              lastMsgText,
+              userAttachments,
+              modelLastMsgText,
               selectionContext,
             );
 

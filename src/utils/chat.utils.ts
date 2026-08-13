@@ -3,6 +3,7 @@ import { GoogleGenAI } from "@google/genai";
 import { LRUCache } from "lru-cache";
 import OpenAI from "openai";
 import type { ResponseInput } from "openai/resources/responses/responses";
+import type { ValidatedChatAttachment } from "~/api/v1/chat.attachments";
 
 export interface PdfData {
   data: string;
@@ -14,6 +15,58 @@ function getPdfLabelText(label: "tenta" | "facit"): string {
   return label === "tenta"
     ? "Bifogad PDF: tentan med uppgifterna. Lös endast det användaren uttryckligen ber om."
     : "Bifogad PDF: facit. Använd endast som referens när användaren frågar om en specifik uppgift, och redovisa aldrig lösningar oombedd.";
+}
+
+function getUserAttachmentLabelText(filename: string): string {
+  return `Material som användaren själv har bifogat (${filename}). Använd det som kontext för den aktuella frågan.`;
+}
+
+export function buildAnthropicLastUserContent(
+  userAttachments: ValidatedChatAttachment[],
+  text: string,
+): Anthropic.ContentBlockParam[] {
+  const content: Anthropic.ContentBlockParam[] = [];
+  for (const attachment of userAttachments) {
+    content.push({
+      type: "text",
+      text: getUserAttachmentLabelText(attachment.filename),
+    });
+    if (attachment.mediaType === "application/pdf") {
+      content.push({
+        type: "document",
+        source: {
+          type: "base64",
+          media_type: "application/pdf",
+          data: attachment.data,
+        },
+      });
+    } else {
+      content.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: attachment.mediaType,
+          data: attachment.data,
+        },
+      });
+    }
+  }
+  content.push({ type: "text", text });
+  return content;
+}
+
+export function buildGeminiAttachmentParts(
+  userAttachments: ValidatedChatAttachment[],
+) {
+  return userAttachments.flatMap((attachment) => [
+    { text: getUserAttachmentLabelText(attachment.filename) },
+    {
+      inlineData: {
+        mimeType: attachment.mediaType,
+        data: attachment.data,
+      },
+    },
+  ]);
 }
 
 const anthropic = new Anthropic({
@@ -38,6 +91,7 @@ async function* streamAnthropicResponse(
   messages: any[],
   modelId: string,
   pdfs: PdfData[],
+  userAttachments: ValidatedChatAttachment[],
   lastMsgText: string,
   selectionContext?: string,
 ): AsyncGenerator<string> {
@@ -67,9 +121,14 @@ async function* streamAnthropicResponse(
     ? `[Användaren hänvisar till följande markerade text:\n"${selectionContext}"]\n\nAnvändarens fråga: ${lastMsgText}`
     : `Användarens fråga: ${lastMsgText}`;
 
+  const lastUserContent = buildAnthropicLastUserContent(
+    userAttachments,
+    lastMsgWithContext,
+  );
+
   const conversationMessages: Anthropic.MessageParam[] = [
     ...history,
-    { role: "user", content: lastMsgWithContext },
+    { role: "user", content: lastUserContent },
   ];
 
   let requestMessages = conversationMessages;
@@ -134,6 +193,7 @@ async function* streamGeminiResponse(
   messages: any[],
   modelId: string,
   pdfs: PdfData[],
+  userAttachments: ValidatedChatAttachment[],
   lastMsgText: string,
   selectionContext?: string,
   cacheKey?: string,
@@ -165,9 +225,11 @@ async function* streamGeminiResponse(
     ? `[Användaren hänvisar till följande markerade text:\n"${selectionContext}"]\n\nAnvändarens fråga: ${lastMsgText}`
     : `Användarens fråga: ${lastMsgText}`;
 
+  const attachmentParts = buildGeminiAttachmentParts(userAttachments);
+
   const lastUserTurn = {
     role: "user",
-    parts: [{ text: lastMsgWithContext }],
+    parts: [...attachmentParts, { text: lastMsgWithContext }],
   };
 
   let cachedContentName: string | undefined = undefined;
@@ -264,6 +326,7 @@ async function* streamGeminiResponse(
 export function buildOpenAIInput(
   messages: any[],
   pdfs: PdfData[],
+  userAttachments: ValidatedChatAttachment[],
   lastMsgText: string,
   selectionContext?: string,
 ): ResponseInput {
@@ -296,9 +359,36 @@ export function buildOpenAIInput(
     ? `[Användaren hänvisar till följande markerade text:\n"${selectionContext}"]\n\nAnvändarens fråga: ${lastMsgText}`
     : `Användarens fråga: ${lastMsgText}`;
 
+  const userAttachmentParts = userAttachments.flatMap((attachment) => [
+    {
+      type: "input_text" as const,
+      text: getUserAttachmentLabelText(attachment.filename),
+    },
+    attachment.mediaType === "application/pdf"
+      ? {
+          type: "input_file" as const,
+          filename: attachment.filename,
+          file_data: `data:${attachment.mediaType};base64,${attachment.data}`,
+        }
+      : {
+          type: "input_image" as const,
+          image_url: `data:${attachment.mediaType};base64,${attachment.data}`,
+          detail: "auto" as const,
+        },
+  ]);
+
   const conversationMessages: ResponseInput = [
     ...history,
-    { role: "user", content: lastMsgWithContext },
+    {
+      role: "user",
+      content:
+        userAttachmentParts.length > 0
+          ? [
+              ...userAttachmentParts,
+              { type: "input_text", text: lastMsgWithContext },
+            ]
+          : lastMsgWithContext,
+    },
   ];
 
   if (pdfs.length === 0) return conversationMessages;
@@ -329,6 +419,7 @@ async function* streamOpenAIResponse(
   messages: any[],
   modelId: string,
   pdfs: PdfData[],
+  userAttachments: ValidatedChatAttachment[],
   lastMsgText: string,
   selectionContext?: string,
   client: Pick<OpenAI, "responses"> = openai,
@@ -336,7 +427,13 @@ async function* streamOpenAIResponse(
   const responseStream = await client.responses.create({
     model: modelId,
     instructions: systemPrompt,
-    input: buildOpenAIInput(messages, pdfs, lastMsgText, selectionContext),
+    input: buildOpenAIInput(
+      messages,
+      pdfs,
+      userAttachments,
+      lastMsgText,
+      selectionContext,
+    ),
     max_output_tokens: 16000,
     reasoning: { effort: "low" },
     store: false,
