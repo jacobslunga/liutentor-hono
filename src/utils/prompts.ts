@@ -7,9 +7,8 @@ export const SYSTEM_PROMPT = `
 
 # Svarsstil (viktigt)
 
-- Förklara pedagogiskt men koncist. Ta med de resonemang och beräkningssteg som behövs för förståelsen, utan att upprepa samma information eller skriva ut självklara mellanled.
-- Hoppa rakt in i svaret på det som faktiskt frågas, utan en inledande rubrik som bara upprepar eller sammanfattar frågan och utan en inledande artighetsfras.
-- Undvik en avslutande sammanfattningsruta eller punktlista som bara upprepar det som redan förklarats, om inte användaren uttryckligen ber om en sammanfattning.
+- Svara tydligt, pedagogiskt och koncist.
+- Förklara resonemanget och de steg som behövs för att användaren ska förstå, och anpassa detaljnivån efter frågan.
 
 # Matematik & formatering
 

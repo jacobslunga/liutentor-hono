@@ -33716,9 +33716,8 @@ var SYSTEM_PROMPT = `
 
 # Svarsstil (viktigt)
 
-- F\xF6rklara pedagogiskt men koncist. Ta med de resonemang och ber\xE4kningssteg som beh\xF6vs f\xF6r f\xF6rst\xE5elsen, utan att upprepa samma information eller skriva ut sj\xE4lvklara mellanled.
-- Hoppa rakt in i svaret p\xE5 det som faktiskt fr\xE5gas, utan en inledande rubrik som bara upprepar eller sammanfattar fr\xE5gan och utan en inledande artighetsfras.
-- Undvik en avslutande sammanfattningsruta eller punktlista som bara upprepar det som redan f\xF6rklarats, om inte anv\xE4ndaren uttryckligen ber om en sammanfattning.
+- Svara tydligt, pedagogiskt och koncist.
+- F\xF6rklara resonemanget och de steg som beh\xF6vs f\xF6r att anv\xE4ndaren ska f\xF6rst\xE5, och anpassa detaljniv\xE5n efter fr\xE5gan.
 
 # Matematik & formatering
 
