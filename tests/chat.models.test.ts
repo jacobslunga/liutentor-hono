@@ -4,6 +4,8 @@ import {
   getModelConfig,
 } from "../src/api/v1/chat.models";
 import {
+  buildAnthropicLastUserContent,
+  buildGeminiAttachmentParts,
   buildOpenAIInput,
   streamOpenAIResponse,
   type PdfData,
@@ -39,6 +41,52 @@ describe("OpenAI chat streaming", () => {
     { data: "solution-data", mimeType: "application/pdf", label: "facit" },
   ];
 
+  const userAttachments = [
+    {
+      data: "user-pdf",
+      filename: "anteckningar.pdf",
+      mediaType: "application/pdf" as const,
+    },
+    {
+      data: "user-image",
+      filename: "figur.png",
+      mediaType: "image/png" as const,
+    },
+  ];
+
+  it("builds native attachment blocks for all providers", () => {
+    const anthropic = buildAnthropicLastUserContent(userAttachments, "Fråga");
+    expect(anthropic).toEqual([
+      expect.objectContaining({ type: "text" }),
+      expect.objectContaining({ type: "document" }),
+      expect.objectContaining({ type: "text" }),
+      expect.objectContaining({ type: "image" }),
+      { type: "text", text: "Fråga" },
+    ]);
+
+    const gemini = buildGeminiAttachmentParts(userAttachments);
+    expect(gemini).toEqual([
+      expect.objectContaining({ text: expect.any(String) }),
+      { inlineData: { mimeType: "application/pdf", data: "user-pdf" } },
+      expect.objectContaining({ text: expect.any(String) }),
+      { inlineData: { mimeType: "image/png", data: "user-image" } },
+    ]);
+
+    const openAI = buildOpenAIInput(
+      [{ role: "user", content: "Fråga" }],
+      [],
+      userAttachments,
+      "Fråga",
+    );
+    expect((openAI[0] as any).content).toEqual([
+      expect.objectContaining({ type: "input_text" }),
+      expect.objectContaining({ type: "input_file" }),
+      expect.objectContaining({ type: "input_text" }),
+      expect.objectContaining({ type: "input_image" }),
+      { type: "input_text", text: "Användarens fråga: Fråga" },
+    ]);
+  });
+
   it("builds input with PDFs, history, and selection context", () => {
     const input = buildOpenAIInput(
       [
@@ -47,6 +95,7 @@ describe("OpenAI chat streaming", () => {
         { role: "user", content: "Ny fråga" },
       ],
       pdfs,
+      [],
       "Ny fråga",
       "markerad text",
     );
@@ -96,6 +145,7 @@ describe("OpenAI chat streaming", () => {
       "Systemprompt",
       [{ role: "user", content: "Fråga" }],
       "gpt-5.6-luna",
+      [],
       [],
       "Fråga",
       undefined,

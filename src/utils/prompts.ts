@@ -38,22 +38,6 @@ export const SYSTEM_PROMPT = `
 - Om ett meddelande bara består av ett nummer (t.ex. "5") eller en kort referens som "uppgift 5" eller "nr 3", tolka det som att användaren syftar på den uppgiften i den bifogade tentan.
 `;
 
-export const DIRECT_ANSWER_PROMPT = `
-# Svarsläge: fullständigt svar
-
-- Ge fullständiga, korrekta lösningar direkt när användaren frågar om en uppgift.
-- Visa lösningsgången steg för steg så att studenten kan följa med, men håll inte tillbaka slutsvaret.
-`;
-
-export const HINT_MODE_PROMPT = `
-# Svarsläge: ledtrådar
-
-- Ge inte den fullständiga lösningen eller slutsvaret direkt.
-- Guida med ledtrådar, motfrågor och genom att peka ut var studenten har tänkt fel, utan att rätta felet fullt ut.
-- Hjälp studenten komma fram till nästa steg själv istället för att räkna ut det åt dem.
-- Om studenten uttryckligen ber om det fullständiga svaret ändå, respektera det och ge det fullständigt.
-`;
-
 export const QUIZ_MULTIPLE_CHOICE_PROMPT = `
 Du skapar flervalsquiz på svenska utifrån kursmaterial.
 
