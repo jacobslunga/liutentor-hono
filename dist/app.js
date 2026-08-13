@@ -77948,9 +77948,9 @@ async function logQuizGeneration(payload) {
 }
 
 // src/api/v1/quiz.route.ts
-var QUIZ_MODEL = "gemini-3.1-flash-lite";
-var googleAi2 = new GoogleGenAI2({
-  apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || ""
+var QUIZ_MODEL = "gpt-5.6-luna";
+var openai2 = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY || ""
 });
 var quiz = new Hono2().basePath("/v1/quiz");
 var multipleChoiceBodySchema = exports_external.object({
@@ -77965,6 +77965,37 @@ Regler:
 - Alla fr\xE5gor och svarsalternativ M\xC5STE vara skrivna p\xE5 svenska.
 - Om tentafr\xE5gorna \xE4r p\xE5 engelska, \xF6vers\xE4tt till svenska.
 `;
+var QUIZ_OUTPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    quiz: {
+      type: "object",
+      properties: {
+        questions: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "integer" },
+              question: { type: "string" },
+              options: {
+                type: "array",
+                items: { type: "string" }
+              },
+              answer: { type: "integer", enum: [0, 1, 2, 3] }
+            },
+            required: ["id", "question", "options", "answer"],
+            additionalProperties: false
+          }
+        }
+      },
+      required: ["questions"],
+      additionalProperties: false
+    }
+  },
+  required: ["quiz"],
+  additionalProperties: false
+};
 function shuffleArray2(items) {
   const copy = [...items];
   for (let i = copy.length - 1;i > 0; i--) {
@@ -78017,63 +78048,42 @@ async function getExamSources(courseCode, examIds) {
   const takeCount = Math.min(shuffled.length <= 2 ? shuffled.length : Math.floor(Math.random() * 4) + 2, 5);
   return shuffled.slice(0, takeCount);
 }
-async function generateQuizFromGemini(pdfs, promptText) {
-  const pdfParts = pdfs.flatMap((pdf) => [
-    {
-      inlineData: {
-        mimeType: pdf.mimeType,
-        data: pdf.data
-      }
-    }
-  ]);
-  const response = await googleAi2.models.generateContent({
+async function generateQuizFromOpenAI(pdfs, promptText) {
+  const response = await openai2.responses.create({
     model: QUIZ_MODEL,
-    contents: [
+    input: [
       {
         role: "user",
-        parts: [
-          ...pdfParts,
-          { text: QUIZ_JSON_INSTRUCTION + `
+        content: [
+          ...pdfs.map((pdf, index) => ({
+            type: "input_file",
+            filename: `tenta-${index + 1}.pdf`,
+            file_data: `data:${pdf.mimeType};base64,${pdf.data}`
+          })),
+          {
+            type: "input_text",
+            text: QUIZ_JSON_INSTRUCTION + `
 
-` + promptText }
+` + promptText
+          }
         ]
       }
     ],
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          quiz: {
-            type: Type.OBJECT,
-            properties: {
-              questions: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    id: { type: Type.INTEGER },
-                    question: { type: Type.STRING },
-                    options: {
-                      type: Type.ARRAY,
-                      items: { type: Type.STRING }
-                    },
-                    answer: { type: Type.INTEGER }
-                  },
-                  required: ["id", "question", "options", "answer"]
-                }
-              }
-            },
-            required: ["questions"]
-          }
-        },
-        required: ["quiz"]
+    text: {
+      format: {
+        type: "json_schema",
+        name: "multiple_choice_quiz",
+        schema: QUIZ_OUTPUT_SCHEMA,
+        strict: true
       }
-    }
+    },
+    reasoning: { effort: "low" },
+    max_output_tokens: 8000,
+    store: false
   });
-  const text = response.text ?? "";
+  const text = response.output_text;
   if (!text)
-    throw new Error("Gemini returned empty response");
+    throw new Error("OpenAI returned empty response");
   return multipleChoiceQuizSchema.parse(JSON.parse(text));
 }
 quiz.post("/multiple-choice/:courseCode", zValidator("param", courseCodeSchema), zValidator("json", multipleChoiceBodySchema), bodyLimit({ maxSize: 256 * 1024 }), timeout(120000), async (c) => {
@@ -78149,7 +78159,7 @@ data: ${JSON.stringify(data)}
         data: exam.base64Data,
         mimeType: "application/pdf"
       }));
-      const parsed = await generateQuizFromGemini(pdfs, promptText);
+      const parsed = await generateQuizFromOpenAI(pdfs, promptText);
       const normalizedQuiz = multipleChoiceQuizSchema.parse(rebalanceQuizAnswerDistribution(parsed));
       await sendEvent("status", {
         step: "finalizing",
