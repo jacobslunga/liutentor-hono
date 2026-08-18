@@ -1,3 +1,5 @@
+import { INTERACTIVE_GRAPH_PROMPT } from "~/api/v1/chat.graphs";
+
 export const SYSTEM_PROMPT = `
 # Språk (allra viktigast — läs detta först)
 
@@ -29,7 +31,9 @@ export const SYSTEM_PROMPT = `
 
 ## Diagram och grafer
 
-- Rita aldrig diagram, flödesscheman, grafer eller andra visualiseringar (t.ex. Mermaid eller funktionsgrafer). Beskriv istället grafens eller diagrammets utseende i vanlig text (t.ex. var funktionen växer/avtar, extrempunkter, asymptoter, nollställen).
+- Använd inte Mermaid eller andra diagramformat. Interaktiva funktions- och sannolikhetsgrafer följer det särskilda formatet nedan.
+
+${INTERACTIVE_GRAPH_PROMPT}
 
 # Kontext
 
