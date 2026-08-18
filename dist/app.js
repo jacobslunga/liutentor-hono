@@ -33706,72 +33706,6 @@ var supabaseMiddleware = async (c, next) => {
   await next();
 };
 
-// src/utils/prompts.ts
-var SYSTEM_PROMPT = `
-# Spr\xE5k (allra viktigast \u2014 l\xE4s detta f\xF6rst)
-
-- Instruktionerna nedan \xE4r skrivna p\xE5 svenska, men det styr INTE vilket spr\xE5k du ska svara p\xE5.
-- Du M\xC5STE alltid svara p\xE5 samma spr\xE5k som anv\xE4ndarens senaste meddelande \xE4r skrivet p\xE5. Om anv\xE4ndaren skriver p\xE5 engelska, svara p\xE5 engelska. Om anv\xE4ndaren skriver p\xE5 svenska, svara p\xE5 svenska. Detta g\xE4ller oavsett vilket spr\xE5k tentan, facit eller resten av denna systemprompt \xE4r p\xE5.
-- Byt svarsspr\xE5k om anv\xE4ndaren byter spr\xE5k mellan meddelanden.
-
-# Svarsstil (viktigt)
-
-- Svara tydligt, pedagogiskt och koncist.
-- F\xF6rklara resonemanget och de steg som beh\xF6vs f\xF6r att anv\xE4ndaren ska f\xF6rst\xE5, och anpassa detaljniv\xE5n efter fr\xE5gan.
-
-# Matematik & formatering
-
-- Bin\xE4ra uppst\xE4llningar och sanningstabeller g\xE4rna i kodblock (text) f\xF6r perfekt kolumnjustering.
-
-## Matematik (viktigt)
-
-- Skriv all matematik med KaTeX-kompatibel notation. H\xE5ll korta variabler, enkla uttryck och korta ekvationer i l\xF6pande text med $...$.
-- Anv\xE4nd frist\xE5ende block med $$...$$ (med en tomrad f\xF6re och efter) endast n\xE4r en ekvation beh\xF6ver betonas, \xE4r f\xF6r l\xE5ng f\xF6r l\xF6pande text eller ing\xE5r i en flerstegsh\xE4rledning.
-- Upprepa aldrig samma uttryck eller ekvation b\xE5de i l\xF6pande text och i ett frist\xE5ende matematikblock. Skriv den en g\xE5ng i det format som passar b\xE4st.
-- Anv\xE4nd aldrig \\( \\), \\[ \\] eller andra avgr\xE4nsare.
-- Varje $ eller $$ som \xF6ppnas m\xE5ste alltid st\xE4ngas med matchande $ eller $$ innan du forts\xE4tter med annan text.
-
-## Kodblock (viktigt)
-
-- All programmeringskod eller kodfragment ska alltid placeras i korrekta Markdown-kodblock med tre backticks och spr\xE5kspecifikation.
-- Blanda aldrig ihop kod med matematik; anv\xE4nd aldrig $ eller $$ f\xF6r kod eller instruktioner fr\xE5n bilden.
-
-## Diagram och grafer
-
-- Rita aldrig diagram, fl\xF6desscheman, grafer eller andra visualiseringar (t.ex. Mermaid eller funktionsgrafer). Beskriv ist\xE4llet grafens eller diagrammets utseende i vanlig text (t.ex. var funktionen v\xE4xer/avtar, extrempunkter, asymptoter, nollst\xE4llen).
-
-# Kontext
-
-- N\xE4mn inte filnamn, "PDF", "uppladdning" eller systemdetaljer f\xF6r anv\xE4ndaren.
-- Om ett meddelande bara best\xE5r av ett nummer (t.ex. "5") eller en kort referens som "uppgift 5" eller "nr 3", tolka det som att anv\xE4ndaren syftar p\xE5 den uppgiften i den bifogade tentan.
-`;
-var QUIZ_MULTIPLE_CHOICE_PROMPT = `
-Du skapar flervalsquiz p\xE5 svenska utifr\xE5n kursmaterial.
-
-## Regler
-
-- Returnera endast giltig JSON enligt det schema du f\xE5tt.
-- Skapa minst 10 fr\xE5gor.
-- Varje fr\xE5ga ska ha exakt 4 svarsalternativ.
-- Exakt ett svar ska vara korrekt.
-- "answer" ska vara indexet 0-3 f\xF6r r\xE4tt alternativ.
-- Fr\xE5gorna ska vara tydliga, korrekta och kursrelevanta.
-- Undvik tvetydiga eller trick-betonade alternativ.
-- Fr\xE5gorna ska vara teoretiska och begreppsbaserade, inte ber\xE4kningsuppgifter.
-- Fr\xE5ga om definitioner, principer, tolkningar, samband och resonemang.
-- Undvik formuleringar som "l\xF6s", "ber\xE4kna", "r\xE4kna ut" eller uppgifter som kr\xE4ver stegvis numerisk utr\xE4kning.
-
-## Matematikformat
-
-- Om matematik beh\xF6vs, skriv den med KaTeX-kompatibel notation.
-- Anv\xE4nd endast $...$ och $$...$$.
-- Anv\xE4nd aldrig \\( \\) eller \\[ \\].
-
-## Spr\xE5k
-
-- Skriv p\xE5 svenska.
-`;
-
 // node_modules/zod/v4/classic/external.js
 var exports_external = {};
 __export(exports_external, {
@@ -48048,6 +47982,236 @@ function date4(params) {
 
 // node_modules/zod/v4/classic/external.js
 config(en_default());
+// src/api/v1/chat.graphs.ts
+var finiteCoordinate = exports_external.number().finite().min(-1e6).max(1e6);
+var displayText = exports_external.string().trim().max(2000);
+var requiredDisplayText = displayText.pipe(exports_external.string().min(1));
+var axisSchema = exports_external.object({
+  min: finiteCoordinate,
+  max: finiteCoordinate,
+  label: displayText.optional()
+}).strict().refine((axis) => axis.min < axis.max, {
+  message: "Axis min must be smaller than max"
+});
+var parameterSchema = exports_external.object({
+  id: exports_external.string().regex(/^[a-z][a-z0-9_]{0,23}$/),
+  label: requiredDisplayText,
+  min: finiteCoordinate,
+  max: finiteCoordinate,
+  step: exports_external.number().finite().positive().max(1e5),
+  initial: finiteCoordinate
+}).strict().superRefine((parameter, ctx) => {
+  if (parameter.min >= parameter.max) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["min"],
+      message: "Parameter min must be smaller than max"
+    });
+  }
+  if (parameter.initial < parameter.min || parameter.initial > parameter.max) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["initial"],
+      message: "Initial value must be inside the parameter range"
+    });
+  }
+});
+var expressionSchema = exports_external.string().trim().min(1).max(240).regex(/^[0-9A-Za-z_+\-*/^().,\s]+$/, "Unsupported expression characters");
+var allowedExpressionNames = new Set([
+  "x",
+  "PI",
+  "E",
+  "sin",
+  "cos",
+  "tan",
+  "asin",
+  "acos",
+  "atan",
+  "sinh",
+  "cosh",
+  "tanh",
+  "sqrt",
+  "log",
+  "ln",
+  "lg",
+  "log10",
+  "abs",
+  "ceil",
+  "floor",
+  "round",
+  "trunc",
+  "exp",
+  "cbrt",
+  "expm1",
+  "log1p",
+  "sign",
+  "log2"
+]);
+var seriesSchema = exports_external.object({
+  label: requiredDisplayText,
+  expression: expressionSchema,
+  style: exports_external.enum(["solid", "dashed"]).default("solid")
+}).strict();
+var pointSchema = exports_external.object({
+  x: finiteCoordinate,
+  y: finiteCoordinate,
+  label: displayText.optional()
+}).strict();
+var interactiveGraphSchema = exports_external.object({
+  version: exports_external.literal(1),
+  title: requiredDisplayText,
+  description: displayText.optional(),
+  xAxis: axisSchema,
+  yAxis: axisSchema,
+  showGrid: exports_external.boolean().default(true),
+  parameters: exports_external.array(parameterSchema).max(4).default([]),
+  series: exports_external.array(seriesSchema).min(1).max(4),
+  points: exports_external.array(pointSchema).max(12).default([])
+}).strict().superRefine((graph, ctx) => {
+  const ids = new Set;
+  const reserved = new Set(["x", "PI", "E"]);
+  for (const [index, parameter] of graph.parameters.entries()) {
+    if (reserved.has(parameter.id) || ids.has(parameter.id)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["parameters", index, "id"],
+        message: "Parameter IDs must be unique and cannot be x, PI, or E"
+      });
+    }
+    ids.add(parameter.id);
+  }
+  const allowedNames = new Set([...allowedExpressionNames, ...ids]);
+  graph.series.forEach((series, index) => {
+    const identifiers = series.expression.match(/(?<![0-9.])[A-Za-z_][A-Za-z0-9_]*/g);
+    const unsupported = identifiers?.find((name) => !allowedNames.has(name));
+    if (unsupported) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["series", index, "expression"],
+        message: `Unsupported expression identifier: ${unsupported}`
+      });
+    }
+  });
+});
+var GRAPH_FENCE = /^```interactive-graph[^\S\r\n]*\r?\n([\s\S]*?)^[\t ]*```[\t ]*\r?$/gm;
+function extractInteractiveGraphBlocks(content) {
+  return [...content.matchAll(GRAPH_FENCE)].map((match2) => {
+    const raw2 = match2[1]?.trim() ?? "";
+    try {
+      const parsed = interactiveGraphSchema.safeParse(JSON.parse(raw2));
+      if (parsed.success)
+        return { raw: raw2, spec: parsed.data };
+      return { raw: raw2, spec: null, error: parsed.error.issues[0]?.message };
+    } catch {
+      return { raw: raw2, spec: null, error: "Invalid JSON" };
+    }
+  });
+}
+var INTERACTIVE_GRAPH_PROMPT = `
+## Interaktiva grafer
+
+- N\xE4r anv\xE4ndarens senaste meddelande ber dig rita, plotta eller visa en graf M\xC5STE svaret inneh\xE5lla exakt ett kodblock m\xE4rkt \`\`\`interactive-graph. Detta g\xE4ller \xE4ven korta uppmaningar som "rita grafen", "plotta den" och "visa grafen".
+- Ers\xE4tt aldrig en efterfr\xE5gad graf med en ASCII-skiss, ett textdiagram eller enbart en beskrivning. Om anv\xE4ndaren uttryckligen ber om en statisk skiss kan du d\xE4remot f\xF6lja det \xF6nskem\xE5let.
+- N\xE4r ingen graf uttryckligen efterfr\xE5gas f\xE5r du l\xE4gga till ett grafblock om det tydligt f\xF6rb\xE4ttrar en matematisk eller statistisk f\xF6rklaring.
+- Skriv en kort f\xF6rklaring i vanlig Markdown och l\xE4gg grafblocket efter den relevanta texten. Visa aldrig JSON-formatet som vanlig kod f\xF6r anv\xE4ndaren.
+- Grafblocket ska endast inneh\xE5lla giltig JSON enligt formatet nedan. Inga kommentarer, Markdown, avslutande kommatecken eller k\xF6rbar JavaScript f\xE5r f\xF6rekomma.
+- Anpassa titel, beskrivning och etiketter till spr\xE5ket i anv\xE4ndarens senaste meddelande.
+- H\xE5ll titel och etiketter korta. L\xE4gg l\xE4ngre f\xF6rklaringar i vanlig Markdown utanf\xF6r grafblocket.
+- Anv\xE4nd parametrar n\xE4r anv\xE4ndaren tj\xE4nar p\xE5 att kunna experimentera med koefficienter, medelv\xE4rde, standardavvikelse, sannolikhet eller liknande.
+- Anv\xE4nd h\xF6gst fyra parametrar och fyra kurvor. V\xE4lj axelintervall s\xE5 att det viktiga omr\xE5det syns.
+- Uttryck f\xE5r endast anv\xE4nda x, parameter-ID:n, talen PI och E, operatorerna + - * / ^, parenteser och funktionerna sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, sqrt, log, ln, lg, log10, abs, ceil, floor, round, trunc, exp, cbrt, expm1, log1p, sign och log2.
+- Skriv explicit multiplikation: 2*x, inte 2x. Anv\xE4nd kalkylatorsyntax, aldrig LaTeX, i expression.
+- F\xF6r normalf\xF6rdelningen kan du exempelvis anv\xE4nda expression "1/(sigma*sqrt(2*PI))*exp(-0.5*((x-mu)/sigma)^2)" med parametrarna mu och sigma.
+- Om ingen graf beh\xF6vs, svara som vanligt utan ett grafblock.
+
+Format:
+\`\`\`interactive-graph
+{
+  "version": 1,
+  "title": "P\xE5verkbar andragradsfunktion",
+  "description": "\xC4ndra koefficienterna och unders\xF6k hur kurvan flyttas.",
+  "xAxis": { "min": -6, "max": 6, "label": "x" },
+  "yAxis": { "min": -8, "max": 12, "label": "f(x)" },
+  "showGrid": true,
+  "parameters": [
+    { "id": "a", "label": "a", "min": -3, "max": 3, "step": 0.1, "initial": 1 }
+  ],
+  "series": [
+    { "label": "f(x)", "expression": "a*x^2", "style": "solid" }
+  ],
+  "points": []
+}
+\`\`\`
+`;
+
+// src/utils/prompts.ts
+var SYSTEM_PROMPT = `
+# Spr\xE5k (allra viktigast \u2014 l\xE4s detta f\xF6rst)
+
+- Instruktionerna nedan \xE4r skrivna p\xE5 svenska, men det styr INTE vilket spr\xE5k du ska svara p\xE5.
+- Du M\xC5STE alltid svara p\xE5 samma spr\xE5k som anv\xE4ndarens senaste meddelande \xE4r skrivet p\xE5. Om anv\xE4ndaren skriver p\xE5 engelska, svara p\xE5 engelska. Om anv\xE4ndaren skriver p\xE5 svenska, svara p\xE5 svenska. Detta g\xE4ller oavsett vilket spr\xE5k tentan, facit eller resten av denna systemprompt \xE4r p\xE5.
+- Byt svarsspr\xE5k om anv\xE4ndaren byter spr\xE5k mellan meddelanden.
+
+# Svarsstil (viktigt)
+
+- Svara tydligt, pedagogiskt och koncist.
+- F\xF6rklara resonemanget och de steg som beh\xF6vs f\xF6r att anv\xE4ndaren ska f\xF6rst\xE5, och anpassa detaljniv\xE5n efter fr\xE5gan.
+
+# Matematik & formatering
+
+- Bin\xE4ra uppst\xE4llningar och sanningstabeller g\xE4rna i kodblock (text) f\xF6r perfekt kolumnjustering.
+
+## Matematik (viktigt)
+
+- Skriv all matematik med KaTeX-kompatibel notation. H\xE5ll korta variabler, enkla uttryck och korta ekvationer i l\xF6pande text med $...$.
+- Anv\xE4nd frist\xE5ende block med $$...$$ (med en tomrad f\xF6re och efter) endast n\xE4r en ekvation beh\xF6ver betonas, \xE4r f\xF6r l\xE5ng f\xF6r l\xF6pande text eller ing\xE5r i en flerstegsh\xE4rledning.
+- Upprepa aldrig samma uttryck eller ekvation b\xE5de i l\xF6pande text och i ett frist\xE5ende matematikblock. Skriv den en g\xE5ng i det format som passar b\xE4st.
+- Anv\xE4nd aldrig \\( \\), \\[ \\] eller andra avgr\xE4nsare.
+- Varje $ eller $$ som \xF6ppnas m\xE5ste alltid st\xE4ngas med matchande $ eller $$ innan du forts\xE4tter med annan text.
+
+## Kodblock (viktigt)
+
+- All programmeringskod eller kodfragment ska alltid placeras i korrekta Markdown-kodblock med tre backticks och spr\xE5kspecifikation.
+- Blanda aldrig ihop kod med matematik; anv\xE4nd aldrig $ eller $$ f\xF6r kod eller instruktioner fr\xE5n bilden.
+
+## Diagram och grafer
+
+- Anv\xE4nd inte Mermaid eller andra diagramformat. Interaktiva funktions- och sannolikhetsgrafer f\xF6ljer det s\xE4rskilda formatet nedan.
+
+${INTERACTIVE_GRAPH_PROMPT}
+
+# Kontext
+
+- N\xE4mn inte filnamn, "PDF", "uppladdning" eller systemdetaljer f\xF6r anv\xE4ndaren.
+- Om ett meddelande bara best\xE5r av ett nummer (t.ex. "5") eller en kort referens som "uppgift 5" eller "nr 3", tolka det som att anv\xE4ndaren syftar p\xE5 den uppgiften i den bifogade tentan.
+`;
+var QUIZ_MULTIPLE_CHOICE_PROMPT = `
+Du skapar flervalsquiz p\xE5 svenska utifr\xE5n kursmaterial.
+
+## Regler
+
+- Returnera endast giltig JSON enligt det schema du f\xE5tt.
+- Skapa minst 10 fr\xE5gor.
+- Varje fr\xE5ga ska ha exakt 4 svarsalternativ.
+- Exakt ett svar ska vara korrekt.
+- "answer" ska vara indexet 0-3 f\xF6r r\xE4tt alternativ.
+- Fr\xE5gorna ska vara tydliga, korrekta och kursrelevanta.
+- Undvik tvetydiga eller trick-betonade alternativ.
+- Fr\xE5gorna ska vara teoretiska och begreppsbaserade, inte ber\xE4kningsuppgifter.
+- Fr\xE5ga om definitioner, principer, tolkningar, samband och resonemang.
+- Undvik formuleringar som "l\xF6s", "ber\xE4kna", "r\xE4kna ut" eller uppgifter som kr\xE4ver stegvis numerisk utr\xE4kning.
+
+## Matematikformat
+
+- Om matematik beh\xF6vs, skriv den med KaTeX-kompatibel notation.
+- Anv\xE4nd endast $...$ och $$...$$.
+- Anv\xE4nd aldrig \\( \\) eller \\[ \\].
+
+## Spr\xE5k
+
+- Skriv p\xE5 svenska.
+`;
+
 // src/api/v1/chat.schemas.ts
 var chatMessageSchema = exports_external.object({
   messages: exports_external.array(exports_external.object({
@@ -77866,6 +78030,11 @@ chat2.post("/completion/:examId", zValidator("param", examIdSchema), bodyLimit({
       content: fullResponse,
       model: resolvedModelId
     });
+    const graphBlocks = extractInteractiveGraphBlocks(fullResponse);
+    const invalidGraphs = graphBlocks.filter((block) => !block.spec);
+    if (invalidGraphs.length > 0) {
+      console.warn(`Chat response contained ${invalidGraphs.length} invalid interactive graph artifact(s)`, invalidGraphs.map((block) => block.error));
+    }
   });
 });
 var chat_routes_default = chat2;
