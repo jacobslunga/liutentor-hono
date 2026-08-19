@@ -17,7 +17,7 @@ const axisSchema = z
 
 const parameterSchema = z
   .object({
-    id: z.string().regex(/^[a-z][a-z0-9_]{0,23}$/),
+    id: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,23}$/),
     label: requiredDisplayText,
     min: finiteCoordinate,
     max: finiteCoordinate,
@@ -111,13 +111,14 @@ export const interactiveGraphSchema = z
   .strict()
   .superRefine((graph, ctx) => {
     const ids = new Set<string>();
-    const reserved = new Set(["x", "PI", "E"]);
+    const reserved = new Set(["x", "PI", "E", ...allowedExpressionNames]);
     for (const [index, parameter] of graph.parameters.entries()) {
       if (reserved.has(parameter.id) || ids.has(parameter.id)) {
         ctx.addIssue({
           code: "custom",
           path: ["parameters", index, "id"],
-          message: "Parameter IDs must be unique and cannot be x, PI, or E",
+          message:
+            "Parameter IDs must be unique and cannot shadow x, PI, E or a function name",
         });
       }
       ids.add(parameter.id);
@@ -176,6 +177,7 @@ export const INTERACTIVE_GRAPH_PROMPT = `
 - Använd parametrar när användaren tjänar på att kunna experimentera med koefficienter, medelvärde, standardavvikelse, sannolikhet eller liknande.
 - Använd högst fyra parametrar och fyra kurvor. Välj axelintervall så att det viktiga området syns.
 - Uttryck får endast använda x, parameter-ID:n, talen PI och E, operatorerna + - * / ^, parenteser och funktionerna sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, sqrt, log, ln, lg, log10, abs, ceil, floor, round, trunc, exp, cbrt, expm1, log1p, sign och log2.
+- Parameter-ID får bara innehålla bokstäver (a-z, A-Z), siffror och understreck, måste börja med en bokstav och får inte vara x, PI, E eller ett funktionsnamn som sin eller log. Använd exakt samma ID i expression som i parameterlistan – det är skiftlägeskänsligt.
 - Skriv explicit multiplikation: 2*x, inte 2x. Använd kalkylatorsyntax, aldrig LaTeX, i expression.
 - För normalfördelningen kan du exempelvis använda expression \"1/(sigma*sqrt(2*PI))*exp(-0.5*((x-mu)/sigma)^2)\" med parametrarna mu och sigma.
 - Om ingen graf behövs, svara som vanligt utan ett grafblock.
