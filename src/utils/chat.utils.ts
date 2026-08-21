@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenAI } from "@google/genai";
 import { LRUCache } from "lru-cache";
@@ -172,7 +173,13 @@ async function* streamAnthropicResponse(
       },
     ],
     ...(supportsAdaptiveThinking
-      ? { thinking: { type: "adaptive" as const } }
+      ? {
+          thinking: { type: "adaptive" as const },
+          // Default effort is "high", which on a $15/MTok output tier buys more
+          // reasoning than tenta-help needs. Medium keeps adaptive thinking on
+          // while pulling the token spend back.
+          output_config: { effort: "medium" as const },
+        }
       : {}),
     messages: requestMessages,
   });
@@ -414,6 +421,25 @@ export function buildOpenAIInput(
   ];
 }
 
+/**
+ * OpenAI caps `prompt_cache_key` at 64 characters, and the conversation cache key
+ * is a pair of full storage URLs. Hashing keeps it stable per exam+facit — which
+ * is all the routing hint needs — while fitting the limit. Callers keep the long
+ * key, since the Gemini cache store wants the unambiguous form.
+ */
+function toPromptCacheKey(cacheKey: string): string {
+  return createHash("sha256").update(cacheKey).digest("hex").slice(0, 32);
+}
+
+/**
+ * The tier a student picks is meant to buy more thinking, not just a bigger
+ * model. Without this the deep tier would reason exactly as briefly as the
+ * balanced one and only cost more.
+ */
+function reasoningEffortFor(modelId: string): "low" | "medium" {
+  return modelId === "gpt-5.6-terra" ? "medium" : "low";
+}
+
 async function* streamOpenAIResponse(
   systemPrompt: string,
   messages: any[],
@@ -422,6 +448,7 @@ async function* streamOpenAIResponse(
   userAttachments: ValidatedChatAttachment[],
   lastMsgText: string,
   selectionContext?: string,
+  cacheKey?: string,
   client: Pick<OpenAI, "responses"> = openai,
 ): AsyncGenerator<string> {
   const responseStream = await client.responses.create({
@@ -435,7 +462,11 @@ async function* streamOpenAIResponse(
       selectionContext,
     ),
     max_output_tokens: 16000,
-    reasoning: { effort: "low" },
+    reasoning: { effort: reasoningEffortFor(modelId) },
+    // Automatic prompt caching keys off the prefix, but the hit rate depends on
+    // same-prefix requests routing together. The exam PDFs are that prefix, so
+    // their cache key is the right routing hint.
+    ...(cacheKey ? { prompt_cache_key: toPromptCacheKey(cacheKey) } : {}),
     store: false,
     stream: true,
   });

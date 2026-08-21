@@ -5,6 +5,7 @@ import { bodyLimit } from "hono/body-limit";
 import { timeout } from "hono/timeout";
 import { stream } from "hono/streaming";
 import { z } from "zod";
+import { rateLimitByIdentity } from "~/utils/rate.limit";
 
 import { supabase } from "~/db/supabase";
 import {
@@ -201,6 +202,9 @@ async function generateQuizFromOpenAI(
 
 quiz.post(
   "/multiple-choice/:courseCode",
+  // Quiz generation is a single expensive call rather than a conversation, so
+  // it needs far less headroom than chat.
+  rateLimitByIdentity({ windowMs: 60_000, max: 5, name: "quiz" }),
   zValidator("param", courseCodeSchema),
   zValidator("json", multipleChoiceBodySchema),
   bodyLimit({ maxSize: 256 * 1024 }),
