@@ -15,6 +15,8 @@ import {
   PdfData,
 } from "~/utils/chat.utils";
 import { getModelConfig } from "./chat.models";
+import { fetchPdfAsBase64 } from "~/utils/pdf.cache";
+import { rateLimitByIdentity } from "~/utils/rate.limit";
 import { extractInteractiveGraphBlocks } from "./chat.graphs";
 import {
   getAuthenticatedUserId,
@@ -40,25 +42,13 @@ function logToDBAsync(payload: any) {
     });
 }
 
-async function fetchPdfAsBase64(url: string): Promise<string | null> {
-  try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      console.error(`Failed to fetch PDF at ${url}: ${response.statusText}`);
-      return null;
-    }
-    const arrayBuffer = await response.arrayBuffer();
-    return Buffer.from(arrayBuffer).toString("base64");
-  } catch (error) {
-    console.error(`Network error fetching PDF at ${url}:`, error);
-    return null;
-  }
-}
-
 const chat = new Hono().basePath("/v1/chat");
 
 chat.post(
   "/completion/:examId",
+  // ~12/min is roughly 10x the fastest real usage: the p25 gap between turns in
+  // a session is 54s, so even an intense student sits near 1/min.
+  rateLimitByIdentity({ windowMs: 60_000, max: 12, name: "chat" }),
   zValidator("param", examIdSchema),
   bodyLimit({ maxSize: 22 * 1024 * 1024 }),
   timeout(120000),
@@ -133,25 +123,20 @@ chat.post(
       await assertConversationOwnership(conversationId, userId);
     }
 
-    const { provider, modelId: resolvedModelId } = getModelConfig(modelId);
+    const {
+      provider,
+      modelId: resolvedModelId,
+      requiresAuth,
+    } = getModelConfig(modelId);
+
+    if (requiresAuth && !userId) {
+      throw new HTTPException(403, {
+        message: "Den här tankenivån kräver att du är inloggad",
+      });
+    }
+
     const lastMsgText = extractTextContent(
       messages[messages.length - 1]?.content,
-    );
-
-    const cyan = "\x1b[36m";
-    const dim = "\x1b[2m";
-    const reset = "\x1b[0m";
-    const bold = "\x1b[1m";
-    console.log(
-      `${cyan}┌─ CHAT REQUEST ${"─".repeat(35)}\n` +
-        `│${reset}  ${bold}Course${reset}   ${dim}→${reset}  ${courseCode ?? "unknown"}\n` +
-        `${cyan}│${reset}  ${bold}Exam ID${reset}  ${dim}→${reset}  ${examId}\n` +
-        `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${resolvedModelId}  ${dim}(${provider})${reset}\n` +
-        `${cyan}│${reset}  ${bold}Messages${reset} ${dim}→${reset}  ${messages.length}\n` +
-        `${cyan}│${reset}  ${bold}Solution${reset} ${dim}→${reset}  ${solutionUrl ? "yes" : "no"}\n` +
-        `${cyan}│${reset}  ${bold}Files${reset}    ${dim}→${reset}  ${userAttachments.length}\n` +
-        `${cyan}│${reset}  ${bold}User${reset}     ${dim}→${reset}  ${dim}${userId ?? `anon:${anonymousUserId}`}${reset}\n` +
-        `${cyan}└${"─".repeat(50)}${reset}`,
     );
 
     logToDBAsync({
@@ -169,6 +154,22 @@ chat.post(
       fetchPdfAsBase64(examUrl),
       solutionUrl ? fetchPdfAsBase64(solutionUrl) : Promise.resolve(null),
     ]);
+
+    const cyan = "\x1b[36m";
+    const dim = "\x1b[2m";
+    const reset = "\x1b[0m";
+    const bold = "\x1b[1m";
+    console.log(
+      `${cyan}┌─ CHAT REQUEST ${"─".repeat(35)}\n` +
+        `│${reset}  ${bold}Course${reset}   ${dim}→${reset}  ${courseCode ?? "unknown"}\n` +
+        `${cyan}│${reset}  ${bold}Exam ID${reset}  ${dim}→${reset}  ${examId}\n` +
+        `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${resolvedModelId}  ${dim}(${provider})${reset}\n` +
+        `${cyan}│${reset}  ${bold}Messages${reset} ${dim}→${reset}  ${messages.length}\n` +
+        `${cyan}│${reset}  ${bold}Facit${reset}    ${dim}→${reset}  ${solutionUrl ? "yes" : "no"}\n` +
+        `${cyan}│${reset}  ${bold}Files${reset}    ${dim}→${reset}  ${userAttachments.length}\n` +
+        `${cyan}│${reset}  ${bold}User${reset}     ${dim}→${reset}  ${dim}${userId ?? `anon:${anonymousUserId}`}${reset}\n` +
+        `${cyan}└${"─".repeat(50)}${reset}`,
+    );
 
     const pdfs: PdfData[] = [];
     if (examBase64) {
@@ -224,6 +225,7 @@ chat.post(
               userAttachments,
               modelLastMsgText,
               selectionContext,
+              cacheKey,
             );
 
     return stream(c, async (s) => {

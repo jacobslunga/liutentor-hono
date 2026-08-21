@@ -13,7 +13,7 @@ import {
 
 describe("chat model routing", () => {
   it("routes Terra and Luna through OpenAI", () => {
-    expect(getModelConfig("gpt-5.6-terra")).toEqual({
+    expect(getModelConfig("gpt-5.6-terra")).toMatchObject({
       provider: "openai",
       modelId: "gpt-5.6-terra",
     });
@@ -23,17 +23,43 @@ describe("chat model routing", () => {
     });
   });
 
-  it("falls back to Luna for omitted or unknown model IDs", () => {
-    expect(getModelConfig()).toEqual({
+  it("falls back to Luna for omitted, empty, or unknown model IDs", () => {
+    for (const id of [undefined, "", "unknown-model"]) {
+      expect(getModelConfig(id)).toEqual({
+        provider: "openai",
+        modelId: DEFAULT_MODEL_ID,
+      });
+    }
+  });
+
+  it("gates the deep tier behind auth and leaves the open tiers ungated", () => {
+    expect(getModelConfig("gpt-5.6-terra")).toEqual({
       provider: "openai",
-      modelId: DEFAULT_MODEL_ID,
+      modelId: "gpt-5.6-terra",
+      requiresAuth: true,
     });
-    expect(getModelConfig("unknown-model")).toEqual({
-      provider: "openai",
-      modelId: DEFAULT_MODEL_ID,
-    });
+    expect(getModelConfig("gpt-5.6-luna").requiresAuth).toBeUndefined();
+    expect(getModelConfig("gemini-3.1-flash-lite").requiresAuth).toBeUndefined();
+  });
+
+  it("no longer serves retired models, falling back to the default tier", () => {
+    for (const retired of [
+      "claude-sonnet-4-6",
+      "claude-haiku-4-5",
+      "gemini-3.6-flash",
+    ]) {
+      expect(getModelConfig(retired)).toEqual({
+        provider: "openai",
+        modelId: DEFAULT_MODEL_ID,
+      });
+    }
   });
 });
+
+// Shaped like production: two full Supabase storage URLs, well past 64 chars.
+const LONG_CACHE_KEY =
+  "https://abcdefghijklmnop.supabase.co/storage/v1/object/public/exams/TATA41/TEN1-2020-06-03.pdf:" +
+  "https://abcdefghijklmnop.supabase.co/storage/v1/object/public/exams/TATA41/TEN1-2020-06-03-solutions.pdf";
 
 describe("OpenAI chat streaming", () => {
   const pdfs: PdfData[] = [
@@ -149,6 +175,7 @@ describe("OpenAI chat streaming", () => {
       [],
       "Fråga",
       undefined,
+      LONG_CACHE_KEY,
       client,
     )) {
       chunks.push(chunk);
@@ -165,5 +192,86 @@ describe("OpenAI chat streaming", () => {
         stream: true,
       }),
     );
+  });
+
+  it("hashes the cache key to fit OpenAI's 64-char cap, stably", async () => {
+    const seen: any[] = [];
+    const create = async (params: any) => {
+      seen.push(params);
+      return (async function* () {
+        yield { type: "response.completed" };
+      })();
+    };
+    const run = (key: string) =>
+      (async () => {
+        for await (const _ of streamOpenAIResponse(
+          "S", [{ role: "user", content: "F" }], "gpt-5.6-luna", [], [], "F",
+          undefined, key, { responses: { create } } as any,
+        )) { /* drained */ }
+      })();
+
+    expect(LONG_CACHE_KEY.length).toBeGreaterThan(64);
+    await run(LONG_CACHE_KEY);
+    await run(LONG_CACHE_KEY);
+    await run(LONG_CACHE_KEY + "-other");
+
+    expect(seen[0].prompt_cache_key.length).toBeLessThanOrEqual(64);
+    // Same exam must route to the same cache, or the hint is worthless.
+    expect(seen[1].prompt_cache_key).toBe(seen[0].prompt_cache_key);
+    // Different exam must not collide onto it.
+    expect(seen[2].prompt_cache_key).not.toBe(seen[0].prompt_cache_key);
+  });
+
+  it("gives the deep tier more reasoning effort than the balanced tier", async () => {
+    const calls: any[] = [];
+    const create = async (params: any) => {
+      calls.push(params);
+      return (async function* () {
+        yield { type: "response.completed" };
+      })();
+    };
+
+    for (const model of ["gpt-5.6-luna", "gpt-5.6-terra"]) {
+      for await (const _ of streamOpenAIResponse(
+        "Systemprompt",
+        [{ role: "user", content: "Fråga" }],
+        model,
+        [],
+        [],
+        "Fråga",
+        undefined,
+        undefined,
+        { responses: { create } } as any,
+      )) {
+        // drained for its side effect on `calls`
+      }
+    }
+
+    expect(calls[0].reasoning).toEqual({ effort: "low" });
+    expect(calls[1].reasoning).toEqual({ effort: "medium" });
+  });
+
+  it("omits the prompt cache key when there is none to pin on", async () => {
+    const create = mock(async () =>
+      (async function* () {
+        yield { type: "response.completed" };
+      })(),
+    );
+
+    for await (const _ of streamOpenAIResponse(
+      "Systemprompt",
+      [{ role: "user", content: "Fråga" }],
+      "gpt-5.6-luna",
+      [],
+      [],
+      "Fråga",
+      undefined,
+      undefined,
+      { responses: { create } } as any,
+    )) {
+      // drained for its side effect on `create`
+    }
+
+    expect(create.mock.calls[0]![0]).not.toHaveProperty("prompt_cache_key");
   });
 });

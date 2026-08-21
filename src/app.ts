@@ -6,6 +6,7 @@ import { supabaseMiddleware } from "~/db/supabase";
 import chat from "~/api/v1/chat.routes";
 import quiz from "~/api/v1/quiz.route";
 import { fail } from "~/utils/response";
+import { logRateLimitBlock } from "~/utils/rate.limit";
 
 const WINDOW_MS = 60_000; // 1 minute
 const MAX_REQUESTS = 60; // per IP per window
@@ -45,6 +46,14 @@ app.use(async (c, next) => {
 
   if (entry.count >= MAX_REQUESTS) {
     const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
+    logRateLimitBlock({
+      limiter: "global-ip",
+      identity: `ip:${ip}`,
+      max: MAX_REQUESTS,
+      windowMs: WINDOW_MS,
+      retryAfter,
+      path: c.req.path,
+    });
     c.header("Retry-After", String(retryAfter));
     return c.json(fail("Too many requests"), 429);
   }
