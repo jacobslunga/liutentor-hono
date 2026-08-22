@@ -37,6 +37,21 @@ export const SYSTEM_PROMPT = `
 - Om ett meddelande bara består av ett nummer (t.ex. "5") eller en kort referens som "uppgift 5" eller "nr 3", tolka det som att användaren syftar på den uppgiften i den bifogade tentan.
 `;
 
+/**
+ * Appended only when the student turned web search on. Without it the model
+ * searches to re-derive things the tenta already states, and every one of those
+ * searches carries a per-call fee.
+ */
+export const WEB_SEARCH_PROMPT = `
+
+# Webbsökning
+
+- Du har tillgång till webbsökning i den här konversationen.
+- Den bifogade tentan och facit är alltid din primära källa. Sök aldrig för att räkna ut, härleda eller förklara något som redan står i materialet.
+- Sök endast när frågan kräver information som inte finns i materialet och som du inte kan veta säkert: aktuella datum, kursplaner, regler, priser, versioner eller annat som kan ha ändrats.
+- Om du söker: nämn kort var uppgiften kommer ifrån i löpande text, och skriv aldrig ut råa URL:er som egna stycken.
+`;
+
 export const QUIZ_MULTIPLE_CHOICE_PROMPT = `
 Du skapar flervalsquiz på svenska utifrån kursmaterial.
 

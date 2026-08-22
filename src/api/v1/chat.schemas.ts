@@ -35,6 +35,7 @@ export const chatMessageSchema = z.object({
   modelId: z.string().optional(),
   conversationId: z.uuid().optional().nullable(),
   selectionContext: z.string().max(2000).optional(),
+  webSearch: z.boolean().optional(),
 });
 
 /**

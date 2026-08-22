@@ -17,7 +17,7 @@ describe("chat model routing", () => {
       provider: "openai",
       modelId: "gpt-5.6-terra",
     });
-    expect(getModelConfig("gpt-5.6-luna")).toEqual({
+    expect(getModelConfig("gpt-5.6-luna")).toMatchObject({
       provider: "openai",
       modelId: "gpt-5.6-luna",
     });
@@ -25,7 +25,7 @@ describe("chat model routing", () => {
 
   it("falls back to Luna for omitted, empty, or unknown model IDs", () => {
     for (const id of [undefined, "", "unknown-model"]) {
-      expect(getModelConfig(id)).toEqual({
+      expect(getModelConfig(id)).toMatchObject({
         provider: "openai",
         modelId: DEFAULT_MODEL_ID,
       });
@@ -33,7 +33,7 @@ describe("chat model routing", () => {
   });
 
   it("gates the deep tier behind auth and leaves the open tiers ungated", () => {
-    expect(getModelConfig("gpt-5.6-terra")).toEqual({
+    expect(getModelConfig("gpt-5.6-terra")).toMatchObject({
       provider: "openai",
       modelId: "gpt-5.6-terra",
       requiresAuth: true,
@@ -42,13 +42,19 @@ describe("chat model routing", () => {
     expect(getModelConfig("gemini-3.1-flash-lite").requiresAuth).toBeUndefined();
   });
 
+  it("marks every live tier as web-search capable", () => {
+    for (const id of ["gemini-3.1-flash-lite", "gpt-5.6-luna", "gpt-5.6-terra"]) {
+      expect(getModelConfig(id).supportsWebSearch).toBe(true);
+    }
+  });
+
   it("no longer serves retired models, falling back to the default tier", () => {
     for (const retired of [
       "claude-sonnet-4-6",
       "claude-haiku-4-5",
       "gemini-3.6-flash",
     ]) {
-      expect(getModelConfig(retired)).toEqual({
+      expect(getModelConfig(retired)).toMatchObject({
         provider: "openai",
         modelId: DEFAULT_MODEL_ID,
       });
@@ -176,9 +182,10 @@ describe("OpenAI chat streaming", () => {
       "Fråga",
       undefined,
       LONG_CACHE_KEY,
+      false,
       client,
     )) {
-      chunks.push(chunk);
+      if (chunk.type === "text") chunks.push(chunk.delta);
     }
 
     expect(chunks).toEqual(["Hej", " världen"]);
@@ -206,7 +213,7 @@ describe("OpenAI chat streaming", () => {
       (async () => {
         for await (const _ of streamOpenAIResponse(
           "S", [{ role: "user", content: "F" }], "gpt-5.6-luna", [], [], "F",
-          undefined, key, { responses: { create } } as any,
+          undefined, key, false, { responses: { create } } as any,
         )) { /* drained */ }
       })();
 
@@ -241,6 +248,7 @@ describe("OpenAI chat streaming", () => {
         "Fråga",
         undefined,
         undefined,
+        false,
         { responses: { create } } as any,
       )) {
         // drained for its side effect on `calls`
@@ -249,6 +257,94 @@ describe("OpenAI chat streaming", () => {
 
     expect(calls[0].reasoning).toEqual({ effort: "low" });
     expect(calls[1].reasoning).toEqual({ effort: "medium" });
+  });
+
+  it("omits the web_search tool unless the turn asked for it", async () => {
+    const calls: any[] = [];
+    const create = async (params: any) => {
+      calls.push(params);
+      return (async function* () {
+        yield { type: "response.completed" };
+      })();
+    };
+
+    for (const webSearch of [false, true]) {
+      for await (const _ of streamOpenAIResponse(
+        "Systemprompt",
+        [{ role: "user", content: "Fråga" }],
+        "gpt-5.6-luna",
+        [],
+        [],
+        "Fråga",
+        undefined,
+        undefined,
+        webSearch,
+        { responses: { create } } as any,
+      )) {
+        // drained for its side effect on `calls`
+      }
+    }
+
+    // The tool call carries a per-call fee, so an untoggled turn must not be
+    // able to incur one no matter what the model would have chosen to do.
+    expect(calls[0]).not.toHaveProperty("tools");
+    expect(calls[1].tools).toEqual([
+      { type: "web_search", search_context_size: "low" },
+    ]);
+  });
+
+  it("turns web search lifecycle events into status and source events", async () => {
+    const create = async () =>
+      (async function* () {
+        yield { type: "response.web_search_call.in_progress" };
+        yield { type: "response.web_search_call.searching" };
+        yield { type: "response.web_search_call.completed" };
+        yield {
+          type: "response.output_text.annotation.added",
+          annotation: {
+            type: "url_citation",
+            url: "https://liu.se/tenta",
+            title: "Tentaperioder",
+          },
+        };
+        // Duplicate citation of the same page must not produce a second chip.
+        yield {
+          type: "response.output_text.annotation.added",
+          annotation: {
+            type: "url_citation",
+            url: "https://liu.se/tenta",
+            title: "Tentaperioder",
+          },
+        };
+        yield { type: "response.output_text.delta", delta: "Svar" };
+        yield { type: "response.completed" };
+      })();
+
+    const events: any[] = [];
+    for await (const event of streamOpenAIResponse(
+      "Systemprompt",
+      [{ role: "user", content: "Fråga" }],
+      "gpt-5.6-luna",
+      [],
+      [],
+      "Fråga",
+      undefined,
+      undefined,
+      true,
+      { responses: { create } } as any,
+    )) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "status", step: "searching", message: "Söker på webben" },
+      { type: "status", step: "search_done", message: "Läser källor" },
+      { type: "text", delta: "Svar" },
+      {
+        type: "sources",
+        items: [{ title: "Tentaperioder", url: "https://liu.se/tenta" }],
+      },
+    ]);
   });
 
   it("omits the prompt cache key when there is none to pin on", async () => {
@@ -267,6 +363,7 @@ describe("OpenAI chat streaming", () => {
       "Fråga",
       undefined,
       undefined,
+      false,
       { responses: { create } } as any,
     )) {
       // drained for its side effect on `create`
