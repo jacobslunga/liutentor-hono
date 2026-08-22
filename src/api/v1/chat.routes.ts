@@ -17,7 +17,6 @@ import {
 import { getModelConfig } from "./chat.models";
 import { fetchPdfAsBase64 } from "~/utils/pdf.cache";
 import { rateLimitByIdentity } from "~/utils/rate.limit";
-import { extractInteractiveGraphBlocks } from "./chat.graphs";
 import {
   getAuthenticatedUserId,
   assertConversationOwnership,
@@ -256,15 +255,6 @@ chat.post(
         content: fullResponse,
         model: resolvedModelId,
       });
-
-      const graphBlocks = extractInteractiveGraphBlocks(fullResponse);
-      const invalidGraphs = graphBlocks.filter((block) => !block.spec);
-      if (invalidGraphs.length > 0) {
-        console.warn(
-          `Chat response contained ${invalidGraphs.length} invalid interactive graph artifact(s)`,
-          invalidGraphs.map((block) => block.error),
-        );
-      }
     });
   },
 );
