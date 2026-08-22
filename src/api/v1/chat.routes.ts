@@ -1,4 +1,4 @@
-import { SYSTEM_PROMPT } from "~/utils/prompts";
+import { SYSTEM_PROMPT, WEB_SEARCH_PROMPT } from "~/utils/prompts";
 import { chatMessageSchema, examIdSchema } from "./chat.schemas";
 import { validateChatAttachments } from "./chat.attachments";
 import { bodyLimit } from "hono/body-limit";
@@ -13,6 +13,7 @@ import {
   streamGeminiResponse,
   streamOpenAIResponse,
   PdfData,
+  ChatStreamEvent,
 } from "~/utils/chat.utils";
 import { getModelConfig } from "./chat.models";
 import { fetchPdfAsBase64 } from "~/utils/pdf.cache";
@@ -104,6 +105,7 @@ chat.post(
       conversationId,
       modelId,
       selectionContext,
+      webSearch: requestedWebSearch,
     } = body;
 
     if (!examUrl || !messages?.length) {
@@ -126,7 +128,10 @@ chat.post(
       provider,
       modelId: resolvedModelId,
       requiresAuth,
+      supportsWebSearch,
     } = getModelConfig(modelId);
+
+    const webSearch = !!requestedWebSearch && !!supportsWebSearch;
 
     if (requiresAuth && !userId) {
       throw new HTTPException(403, {
@@ -166,6 +171,7 @@ chat.post(
         `${cyan}│${reset}  ${bold}Messages${reset} ${dim}→${reset}  ${messages.length}\n` +
         `${cyan}│${reset}  ${bold}Facit${reset}    ${dim}→${reset}  ${solutionUrl ? "yes" : "no"}\n` +
         `${cyan}│${reset}  ${bold}Files${reset}    ${dim}→${reset}  ${userAttachments.length}\n` +
+        `${cyan}│${reset}  ${bold}Webb${reset}     ${dim}→${reset}  ${webSearch ? "on" : "off"}\n` +
         `${cyan}│${reset}  ${bold}User${reset}     ${dim}→${reset}  ${dim}${userId ?? `anon:${anonymousUserId}`}${reset}\n` +
         `${cyan}└${"─".repeat(50)}${reset}`,
     );
@@ -186,7 +192,9 @@ chat.post(
       });
     }
 
-    const systemPrompt = SYSTEM_PROMPT;
+    const systemPrompt = webSearch
+      ? SYSTEM_PROMPT + WEB_SEARCH_PROMPT
+      : SYSTEM_PROMPT;
 
     const modelLastMsgText =
       lastMsgText.trim() ||
@@ -205,6 +213,7 @@ chat.post(
             modelLastMsgText,
             selectionContext,
             cacheKey,
+            webSearch,
           )
         : provider === "anthropic"
           ? streamAnthropicResponse(
@@ -225,24 +234,68 @@ chat.post(
               modelLastMsgText,
               selectionContext,
               cacheKey,
+              webSearch,
             );
 
-    return stream(c, async (s) => {
+    // Status and source events need a frame to travel in, but a browser holding a
+    // cached bundle still speaks the old concatenate-the-bytes protocol. Serving
+    // both off the same generator lets the two repos deploy independently; the
+    // plaintext branch can be deleted once no client asks for it.
+    const wantsEvents = (c.req.header("accept") ?? "").includes(
+      "text/event-stream",
+    );
+
+    if (wantsEvents) {
+      c.header("Content-Type", "text/event-stream; charset=utf-8");
+      c.header("Cache-Control", "no-cache");
+      c.header("Connection", "keep-alive");
+      // Cloud Run buffers a response it thinks it can compress, which would hold
+      // every status event until the turn finished — exactly backwards.
+      c.header("X-Accel-Buffering", "no");
+    } else {
       c.header("Content-Type", "text/plain; charset=utf-8");
       c.header("Transfer-Encoding", "chunked");
+    }
 
+    return stream(c, async (s) => {
       let fullResponse = "";
 
-      try {
-        for await (const text of responseStream) {
-          fullResponse += text;
-          await s.write(text);
+      const sendEvent = async (type: string, data: unknown) => {
+        await s.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
+      };
+
+      const emit = async (event: ChatStreamEvent) => {
+        if (event.type === "text") {
+          fullResponse += event.delta;
+          if (!wantsEvents) {
+            await s.write(event.delta);
+            return;
+          }
+        } else if (!wantsEvents) {
+          // The plaintext protocol has nowhere to put anything but text.
+          return;
         }
+        await sendEvent(event.type, event);
+      };
+
+      try {
+        for await (const event of responseStream) {
+          await emit(event);
+        }
+        if (wantsEvents) await sendEvent("done", {});
       } catch (error: any) {
         console.error("Streaming error:", error);
-        throw new HTTPException(500, {
-          message: "Failed while streaming response",
-        });
+        // Once bytes are on the wire an HTTP status can no longer say anything,
+        // so a framed client gets a real error frame instead of a truncated turn.
+        if (wantsEvents) {
+          await sendEvent("error", {
+            message: "Något gick fel. Försök igen senare.",
+          });
+        } else {
+          throw new HTTPException(500, {
+            message: "Failed while streaming response",
+          });
+        }
       }
 
       logToDBAsync({

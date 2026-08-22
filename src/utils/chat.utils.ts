@@ -12,6 +12,22 @@ export interface PdfData {
   label: "tenta" | "facit";
 }
 
+export interface ChatSource {
+  title: string;
+  url: string;
+}
+
+/**
+ * The provider generators used to yield plain strings, which left no room to say
+ * anything about a turn other than its text. Web search means a turn now does
+ * visible work before it answers, so they yield framed events instead and the
+ * route decides how to put them on the wire.
+ */
+export type ChatStreamEvent =
+  | { type: "text"; delta: string }
+  | { type: "status"; step: "searching" | "search_done"; message: string }
+  | { type: "sources"; items: ChatSource[] };
+
 function getPdfLabelText(label: "tenta" | "facit"): string {
   return label === "tenta"
     ? "Bifogad PDF: tentan med uppgifterna. Lös endast det användaren uttryckligen ber om."
@@ -95,7 +111,7 @@ async function* streamAnthropicResponse(
   userAttachments: ValidatedChatAttachment[],
   lastMsgText: string,
   selectionContext?: string,
-): AsyncGenerator<string> {
+): AsyncGenerator<ChatStreamEvent> {
   const history: Anthropic.MessageParam[] = messages
     .slice(0, -1)
     .map((message: any) => {
@@ -190,7 +206,7 @@ async function* streamAnthropicResponse(
       event.delta.type === "text_delta" &&
       event.delta.text
     ) {
-      yield event.delta.text;
+      yield { type: "text", delta: event.delta.text };
     }
   }
 }
@@ -204,7 +220,8 @@ async function* streamGeminiResponse(
   lastMsgText: string,
   selectionContext?: string,
   cacheKey?: string,
-): AsyncGenerator<string> {
+  webSearch = false,
+): AsyncGenerator<ChatStreamEvent> {
   const history = messages
     .slice(0, -1)
     .map((message: any) => {
@@ -241,7 +258,11 @@ async function* streamGeminiResponse(
 
   let cachedContentName: string | undefined = undefined;
 
-  if (pdfs.length > 0 && cacheKey) {
+  // An explicit cache fixes its tool set at creation time, so a cached entry
+  // built without googleSearch cannot be reused for a grounded turn. Search-on
+  // turns are the rare case, so they inline the PDFs instead of forcing a second
+  // cache variant keyed by search.
+  if (pdfs.length > 0 && cacheKey && !webSearch) {
     const fullCacheKey = `${modelId}:${cacheKey}`;
     const cached = geminiCacheStore.get(fullCacheKey);
     if (cached) {
@@ -320,13 +341,47 @@ async function* streamGeminiResponse(
       ...(cachedContentName
         ? { cachedContent: cachedContentName }
         : { systemInstruction: systemPrompt }),
+      ...(webSearch ? { tools: [{ googleSearch: {} }] } : {}),
     },
   });
 
+  // Unlike OpenAI, Gemini gives no in-progress signal: the search runs server
+  // side and only surfaces in groundingMetadata, often on a late chunk. So this
+  // status is optimistic — we say "searching" the moment the request is out, then
+  // either refine it with the real query or clear it when text starts arriving.
+  if (webSearch) {
+    yield { type: "status", step: "searching", message: "Söker på webben" };
+  }
+
+  const sources = new Map<string, ChatSource>();
+  let searching = webSearch;
+
   for await (const chunk of responseStream) {
-    if (chunk.text) {
-      yield chunk.text;
+    const grounding = chunk.candidates?.[0]?.groundingMetadata;
+
+    if (grounding) {
+      for (const groundingChunk of grounding.groundingChunks ?? []) {
+        const url = groundingChunk.web?.uri;
+        if (url && !sources.has(url)) {
+          sources.set(url, { title: groundingChunk.web?.title || url, url });
+        }
+      }
     }
+
+    if (chunk.text) {
+      if (searching) {
+        searching = false;
+        yield { type: "status", step: "search_done", message: "Läser källor" };
+      }
+      yield { type: "text", delta: chunk.text };
+    }
+  }
+
+  if (searching) {
+    yield { type: "status", step: "search_done", message: "" };
+  }
+  if (sources.size > 0) {
+    yield { type: "sources", items: [...sources.values()] };
   }
 }
 
@@ -449,8 +504,9 @@ async function* streamOpenAIResponse(
   lastMsgText: string,
   selectionContext?: string,
   cacheKey?: string,
+  webSearch = false,
   client: Pick<OpenAI, "responses"> = openai,
-): AsyncGenerator<string> {
+): AsyncGenerator<ChatStreamEvent> {
   const responseStream = await client.responses.create({
     model: modelId,
     instructions: systemPrompt,
@@ -467,14 +523,63 @@ async function* streamOpenAIResponse(
     // same-prefix requests routing together. The exam PDFs are that prefix, so
     // their cache key is the right routing hint.
     ...(cacheKey ? { prompt_cache_key: toPromptCacheKey(cacheKey) } : {}),
+    // "low" context keeps the search-content block that gets billed into the
+    // prompt small. A tenta question needs a fact, not a literature review.
+    ...(webSearch
+      ? {
+          tools: [
+            { type: "web_search" as const, search_context_size: "low" as const },
+          ],
+        }
+      : {}),
     store: false,
     stream: true,
   });
 
+  const sources = new Map<string, ChatSource>();
+  let searching = false;
+
   for await (const event of responseStream) {
-    if (event.type === "response.output_text.delta" && event.delta) {
-      yield event.delta;
+    switch (event.type) {
+      // OpenAI does not reveal the query until the search has already finished
+      // (the item carries `action.query` only on output_item.done, after
+      // .completed), so there is no honest way to name it while it runs. The
+      // status stays generic here; Gemini is the one that can be specific.
+      case "response.web_search_call.in_progress":
+      case "response.web_search_call.searching":
+        if (searching) break;
+        searching = true;
+        yield { type: "status", step: "searching", message: "Söker på webben" };
+        break;
+
+      case "response.web_search_call.completed":
+        searching = false;
+        yield { type: "status", step: "search_done", message: "Läser källor" };
+        break;
+
+      case "response.output_text.annotation.added": {
+        const annotation = event.annotation as any;
+        if (annotation?.type !== "url_citation" || !annotation.url) break;
+        if (!sources.has(annotation.url)) {
+          sources.set(annotation.url, {
+            title: annotation.title || annotation.url,
+            url: annotation.url,
+          });
+        }
+        break;
+      }
+
+      case "response.output_text.delta":
+        if (event.delta) yield { type: "text", delta: event.delta };
+        break;
     }
+  }
+
+  if (searching) {
+    yield { type: "status", step: "search_done", message: "" };
+  }
+  if (sources.size > 0) {
+    yield { type: "sources", items: [...sources.values()] };
   }
 }
 
