@@ -1,8 +1,8 @@
 import { describe, expect, it, mock } from "bun:test";
 import {
-  generateQuizFromGemini,
+  generateQuizFromOpenAI,
   QUIZ_MODEL,
-  QUIZ_THINKING_LEVEL,
+  QUIZ_REASONING_EFFORT,
 } from "../src/api/v1/quiz.route";
 import {
   QUIZ_DIFFICULTY_PROMPTS,
@@ -10,7 +10,7 @@ import {
 } from "../src/utils/prompts";
 import { quizDifficultySchema } from "../src/api/v1/quiz.schemas";
 
-describe("Gemini quiz generation", () => {
+describe("OpenAI quiz generation", () => {
   it("uses PDF input, structured JSON, and high thinking", async () => {
     const quiz = {
       quiz: {
@@ -22,50 +22,57 @@ describe("Gemini quiz generation", () => {
         })),
       },
     };
-    const generateContent = mock(async (_request: any) => ({
-      text: JSON.stringify(quiz),
+    const create = mock(async (_request: any) => ({
+      output_text: JSON.stringify(quiz),
     }));
 
-    const result = await generateQuizFromGemini(
+    const result = await generateQuizFromOpenAI(
       [{ data: "pdf-data", mimeType: "application/pdf" }],
       "Skapa ett quiz för TATA41",
-      { models: { generateContent } } as any,
+      { responses: { create } } as any,
     );
 
     expect(result).toEqual(quiz);
-    const request = generateContent.mock.calls[0]![0] as any;
+    const request = create.mock.calls[0]![0] as any;
     expect(request).toMatchObject({
       model: QUIZ_MODEL,
-      config: {
-        thinkingConfig: { thinkingLevel: QUIZ_THINKING_LEVEL.toUpperCase() },
-        responseMimeType: "application/json",
-        maxOutputTokens: 8000,
-      },
-    });
-    expect(request.config.responseJsonSchema).toBeDefined();
-    expect(request.contents[0].parts).toEqual([
-      { text: "Tentamensunderlag 1:" },
-      {
-        inlineData: {
-          mimeType: "application/pdf",
-          data: "pdf-data",
+      reasoning: { effort: QUIZ_REASONING_EFFORT },
+      max_output_tokens: 8000,
+      store: false,
+      text: {
+        format: {
+          type: "json_schema",
+          name: "multiple_choice_quiz",
+          strict: true,
         },
       },
-      { text: expect.stringContaining("Skapa ett quiz för TATA41") },
+    });
+    expect(request.text.format.schema).toBeDefined();
+    expect(request.input[0].content).toEqual([
+      { type: "input_text", text: "Tentamensunderlag 1:" },
+      {
+        type: "input_file",
+        filename: "tenta-1.pdf",
+        file_data: "data:application/pdf;base64,pdf-data",
+      },
+      {
+        type: "input_text",
+        text: expect.stringContaining("Skapa ett quiz för TATA41"),
+      },
     ]);
   });
 
   it("rejects empty or invalid model output", async () => {
-    const empty = { models: { generateContent: async () => ({ text: "" }) } };
+    const empty = { responses: { create: async () => ({ output_text: "" }) } };
     await expect(
-      generateQuizFromGemini([], "Prompt", empty as any),
-    ).rejects.toThrow("Gemini returned empty response");
+      generateQuizFromOpenAI([], "Prompt", empty as any),
+    ).rejects.toThrow("OpenAI returned empty response");
 
     const invalid = {
-      models: { generateContent: async () => ({ text: '{"quiz":{}}' }) },
+      responses: { create: async () => ({ output_text: '{"quiz":{}}' }) },
     };
     await expect(
-      generateQuizFromGemini([], "Prompt", invalid as any),
+      generateQuizFromOpenAI([], "Prompt", invalid as any),
     ).rejects.toThrow();
   });
 });

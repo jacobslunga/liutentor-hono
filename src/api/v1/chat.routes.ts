@@ -10,7 +10,7 @@ import { HTTPException } from "hono/http-exception";
 import { stream } from "hono/streaming";
 import { supabase } from "~/db/supabase";
 import {
-  streamGeminiResponse,
+  streamOpenAIResponse,
   PdfData,
   ChatStreamEvent,
 } from "~/utils/chat.utils";
@@ -128,7 +128,7 @@ chat.post(
     const {
       provider,
       modelId: resolvedModelId,
-      thinkingLevel,
+      effort,
       requiresAuth,
       supportsWebSearch,
     } = modelConfig;
@@ -176,7 +176,7 @@ chat.post(
       `${cyan}┌─ CHAT REQUEST ${"─".repeat(35)}\n` +
         `│${reset}  ${bold}Course${reset}   ${dim}→${reset}  ${courseCode ?? "unknown"}\n` +
         `${cyan}│${reset}  ${bold}Exam ID${reset}  ${dim}→${reset}  ${examId}\n` +
-        `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${resolvedModelId}  ${dim}(${provider}, ${thinkingLevel})${reset}\n` +
+        `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${resolvedModelId}  ${dim}(${provider}, ${effort})${reset}\n` +
         `${cyan}│${reset}  ${bold}Messages${reset} ${dim}→${reset}  ${messages.length}\n` +
         `${cyan}│${reset}  ${bold}Facit${reset}    ${dim}→${reset}  ${solutionUrl ? "yes" : "no"}\n` +
         `${cyan}│${reset}  ${bold}Files${reset}    ${dim}→${reset}  ${userAttachments.length}\n` +
@@ -212,7 +212,7 @@ chat.post(
 
     const cacheKey = `${examUrl}:${solutionUrl || ""}`;
 
-    const responseStream = streamGeminiResponse(
+    const responseStream = streamOpenAIResponse(
       systemPrompt,
       messages,
       resolvedModelId,
@@ -222,7 +222,7 @@ chat.post(
       selectionContext,
       cacheKey,
       webSearch,
-      thinkingLevel,
+      effort,
     );
 
     // Status and source events need a frame to travel in, but a browser holding a

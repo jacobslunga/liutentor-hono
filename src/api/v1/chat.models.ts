@@ -1,45 +1,46 @@
-export type Provider = "google";
-export type ThinkingLevel = "minimal" | "medium" | "high";
+export type Provider = "openai";
+export type ReasoningEffort = "medium" | "high";
 
 export interface ModelConfig {
   provider: Provider;
   modelId: string;
-  thinkingLevel: ThinkingLevel;
+  effort: ReasoningEffort;
   /** The deep tier remains protected from anonymous abuse. */
   requiresAuth?: boolean;
   /** Keep tool support explicit so a future tier cannot silently 400. */
   supportsWebSearch?: boolean;
 }
 
-export const GEMINI_CHAT_MODEL_ID = "gemini-3.1-flash-lite";
+export const LUNA_CHAT_MODEL_ID = "gpt-5.6-luna";
+export const TERRA_CHAT_MODEL_ID = "gpt-5.6-terra";
 
 export const CHAT_TIER_IDS = {
-  low: "gemini-flash-lite-minimal",
-  balanced: "gemini-flash-lite-medium",
-  deep: "gemini-flash-lite-high",
+  low: "gpt-5.6-luna-medium",
+  balanced: "gpt-5.6-luna-high",
+  deep: "gpt-5.6-terra-high",
 } as const;
 
 /** The public selection ID used when a client omits or sends an unknown tier. */
 export const DEFAULT_MODEL_ID = CHAT_TIER_IDS.low;
 
 const LOW_CONFIG: ModelConfig = {
-  provider: "google",
-  modelId: GEMINI_CHAT_MODEL_ID,
-  thinkingLevel: "minimal",
+  provider: "openai",
+  modelId: LUNA_CHAT_MODEL_ID,
+  effort: "medium",
   supportsWebSearch: true,
 };
 
 const BALANCED_CONFIG: ModelConfig = {
-  provider: "google",
-  modelId: GEMINI_CHAT_MODEL_ID,
-  thinkingLevel: "medium",
+  provider: "openai",
+  modelId: LUNA_CHAT_MODEL_ID,
+  effort: "high",
   supportsWebSearch: true,
 };
 
 const DEEP_CONFIG: ModelConfig = {
-  provider: "google",
-  modelId: GEMINI_CHAT_MODEL_ID,
-  thinkingLevel: "high",
+  provider: "openai",
+  modelId: TERRA_CHAT_MODEL_ID,
+  effort: "high",
   requiresAuth: true,
   supportsWebSearch: true,
 };
@@ -50,8 +51,12 @@ const MODEL_MAP: Record<string, ModelConfig> = {
   [CHAT_TIER_IDS.deep]: DEEP_CONFIG,
 
   // Compatibility aliases let the Hono service deploy before the Nuxt client.
-  // They can be removed after old bundles and v11 cookies have aged out.
+  // They can be removed after old bundles and cookies have aged out.
+  "gemini-flash-lite-minimal": LOW_CONFIG,
+  "gemini-flash-lite-medium": BALANCED_CONFIG,
+  "gemini-flash-lite-high": DEEP_CONFIG,
   "gemini-3.1-flash-lite": LOW_CONFIG,
+  // The current client uses the bare Luna ID for its medium selector.
   "gpt-5.6-luna": BALANCED_CONFIG,
   "gpt-5.6-terra": DEEP_CONFIG,
 };
@@ -60,4 +65,4 @@ export const getModelConfig = (modelId?: string): ModelConfig =>
   (modelId ? MODEL_MAP[modelId] : undefined) ?? LOW_CONFIG;
 
 export const getModelLogId = (config: ModelConfig): string =>
-  `${config.modelId}:${config.thinkingLevel}`;
+  `${config.modelId}:${config.effort}`;
