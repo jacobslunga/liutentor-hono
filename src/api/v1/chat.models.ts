@@ -1,5 +1,5 @@
 export type Provider = "openai";
-export type ReasoningEffort = "medium" | "high";
+export type ReasoningEffort = "low" | "medium" | "high";
 
 export interface ModelConfig {
   provider: Provider;
@@ -11,13 +11,13 @@ export interface ModelConfig {
   supportsWebSearch?: boolean;
 }
 
-export const LUNA_CHAT_MODEL_ID = "gpt-5.6-luna";
-export const TERRA_CHAT_MODEL_ID = "gpt-5.6-terra";
+export const LUNA_CHAT_MODEL_ID = "gpt-6-luna";
+export const SOL_CHAT_MODEL_ID = "gpt-6-sol";
 
 export const CHAT_TIER_IDS = {
-  low: "gpt-5.6-luna-medium",
-  balanced: "gpt-5.6-luna-high",
-  deep: "gpt-5.6-terra-high",
+  low: "gpt-6-luna-low",
+  balanced: "gpt-6-luna-high",
+  deep: "gpt-6-sol-low",
 } as const;
 
 /** The public selection ID used when a client omits or sends an unknown tier. */
@@ -26,7 +26,7 @@ export const DEFAULT_MODEL_ID = CHAT_TIER_IDS.low;
 const LOW_CONFIG: ModelConfig = {
   provider: "openai",
   modelId: LUNA_CHAT_MODEL_ID,
-  effort: "medium",
+  effort: "low",
   supportsWebSearch: true,
 };
 
@@ -39,8 +39,8 @@ const BALANCED_CONFIG: ModelConfig = {
 
 const DEEP_CONFIG: ModelConfig = {
   provider: "openai",
-  modelId: TERRA_CHAT_MODEL_ID,
-  effort: "high",
+  modelId: SOL_CHAT_MODEL_ID,
+  effort: "low",
   requiresAuth: true,
   supportsWebSearch: true,
 };
@@ -56,7 +56,9 @@ const MODEL_MAP: Record<string, ModelConfig> = {
   "gemini-flash-lite-medium": BALANCED_CONFIG,
   "gemini-flash-lite-high": DEEP_CONFIG,
   "gemini-3.1-flash-lite": LOW_CONFIG,
-  // The current client uses the bare Luna ID for its medium selector.
+  "gpt-6-luna": LOW_CONFIG,
+  "gpt-6-sol": DEEP_CONFIG,
+  // Compatibility for clients that sent the previous concrete model IDs.
   "gpt-5.6-luna": BALANCED_CONFIG,
   "gpt-5.6-terra": DEEP_CONFIG,
 };

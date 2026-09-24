@@ -10,6 +10,7 @@ import { HTTPException } from "hono/http-exception";
 import { stream } from "hono/streaming";
 import { supabase } from "~/db/supabase";
 import {
+  generateConversationTitle,
   streamOpenAIResponse,
   PdfData,
   ChatStreamEvent,
@@ -102,6 +103,7 @@ chat.post(
       solutionUrl,
       courseCode,
       conversationId,
+      isFirstMessage,
       modelId,
       selectionContext,
       webSearch: requestedWebSearch,
@@ -114,6 +116,7 @@ chat.post(
 
     const anonymousUserId = c.req.header("x-anonymous-user-id") || "unknown";
     const userId = await getAuthenticatedUserId(c.req.header("Authorization"));
+    let shouldGenerateTitle = false;
 
     if (conversationId) {
       if (!userId) {
@@ -122,6 +125,17 @@ chat.post(
         });
       }
       await assertConversationOwnership(conversationId, userId);
+      if (isFirstMessage) {
+        const { count, error } = await supabase
+          .from("ai_chat_logs")
+          .select("id", { count: "exact", head: true })
+          .eq("conversation_id", conversationId);
+        if (error) {
+          console.error("Conversation title eligibility error:", error.message);
+        } else {
+          shouldGenerateTitle = count === 0;
+        }
+      }
     }
 
     const modelConfig = getModelConfig(modelId);
@@ -270,6 +284,37 @@ chat.post(
         for await (const event of responseStream) {
           await emit(event);
         }
+
+        if (
+          userId &&
+          conversationId &&
+          shouldGenerateTitle &&
+          fullResponse.trim()
+        ) {
+          try {
+            const title = await generateConversationTitle(
+              courseCode,
+              lastMsgText,
+              fullResponse,
+            );
+            if (title) {
+              const { error } = await supabase
+                .from("conversations")
+                .update({ title })
+                .eq("id", conversationId)
+                .eq("user_id", userId);
+              if (error) {
+                console.error("Conversation title update error:", error.message);
+              } else if (wantsEvents) {
+                await sendEvent("title", { title });
+              }
+            }
+          } catch (error) {
+            // A title is decorative; never fail an otherwise successful answer.
+            console.error("Conversation title generation error:", error);
+          }
+        }
+
         if (wantsEvents) await sendEvent("done", {});
       } catch (error: any) {
         console.error("Streaming error:", error);

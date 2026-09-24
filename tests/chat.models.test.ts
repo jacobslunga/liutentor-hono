@@ -3,22 +3,23 @@ import {
   CHAT_TIER_IDS,
   DEFAULT_MODEL_ID,
   LUNA_CHAT_MODEL_ID,
-  TERRA_CHAT_MODEL_ID,
+  SOL_CHAT_MODEL_ID,
   getModelConfig,
   getModelLogId,
 } from "../src/api/v1/chat.models";
 import {
   buildOpenAIInput,
+  generateConversationTitle,
   streamOpenAIResponse,
   type PdfData,
 } from "../src/utils/chat.utils";
 
 describe("chat model routing", () => {
-  it("uses Luna/default, Luna/high, and Terra/high for the three tiers", () => {
+  it("uses Luna/low, Luna/high, and Sol/low for the three tiers", () => {
     expect(getModelConfig(CHAT_TIER_IDS.low)).toMatchObject({
       provider: "openai",
       modelId: LUNA_CHAT_MODEL_ID,
-      effort: "medium",
+      effort: "low",
     });
     expect(getModelConfig(CHAT_TIER_IDS.balanced)).toMatchObject({
       provider: "openai",
@@ -27,8 +28,8 @@ describe("chat model routing", () => {
     });
     expect(getModelConfig(CHAT_TIER_IDS.deep)).toMatchObject({
       provider: "openai",
-      modelId: TERRA_CHAT_MODEL_ID,
-      effort: "high",
+      modelId: SOL_CHAT_MODEL_ID,
+      effort: "low",
       requiresAuth: true,
     });
   });
@@ -39,19 +40,21 @@ describe("chat model routing", () => {
       expect(getModelConfig(id)).toMatchObject({
         provider: "openai",
         modelId: LUNA_CHAT_MODEL_ID,
-        effort: "medium",
+        effort: "low",
       });
     }
   });
 
   it("keeps old clients compatible while preserving deep-tier auth", () => {
-    expect(getModelConfig("gemini-flash-lite-minimal").effort).toBe("medium");
+    expect(getModelConfig("gemini-flash-lite-minimal").effort).toBe("low");
     expect(getModelConfig("gemini-flash-lite-medium").effort).toBe("high");
     expect(getModelConfig("gemini-flash-lite-high")).toMatchObject({
-      modelId: TERRA_CHAT_MODEL_ID,
-      effort: "high",
+      modelId: SOL_CHAT_MODEL_ID,
+      effort: "low",
       requiresAuth: true,
     });
+    expect(getModelConfig("gpt-6-luna").effort).toBe("low");
+    expect(getModelConfig("gpt-6-sol").requiresAuth).toBe(true);
     expect(getModelConfig("gpt-5.6-luna").effort).toBe("high");
     expect(getModelConfig("gpt-5.6-terra").requiresAuth).toBe(true);
   });
@@ -208,5 +211,77 @@ describe("OpenAI chat streaming", () => {
     expect((create.mock.calls[0]![0] as any).tools).toEqual([
       { type: "web_search", search_context_size: "low" },
     ]);
+  });
+});
+
+describe("conversation title generation", () => {
+  it("uses the fast model with course, question, and answer context", async () => {
+    const create = mock(async (_request: any) => ({
+      status: "completed",
+      output_text: '  "Lösning av uppgift 3"  ',
+    }));
+
+    const title = await generateConversationTitle(
+      "TSFS12",
+      "Hur löser man fråga 3?",
+      "Vi börjar med att Laplacetransformera systemet.",
+      { responses: { create } } as any,
+    );
+
+    expect(title).toBe("Lösning av uppgift 3");
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: LUNA_CHAT_MODEL_ID,
+        max_output_tokens: 256,
+        reasoning: { effort: "low" },
+        store: false,
+      }),
+    );
+    const request = create.mock.calls[0]![0] as any;
+    expect(request.input).toContain("TSFS12");
+    expect(request.input).toContain("Hur löser man fråga 3?");
+    expect(request.input).toContain("Laplacetransformera");
+  });
+
+  it("normalizes whitespace and caps overly long titles", async () => {
+    const create = mock(async (_request: any) => ({
+      status: "completed",
+      output_text: `  ${"väldigt lång titel ".repeat(8)}  `,
+    }));
+
+    const title = await generateConversationTitle("TDDD01", "Fråga", "Svar", {
+      responses: { create },
+    } as any);
+
+    expect(title?.length).toBeLessThanOrEqual(60);
+    expect(title?.endsWith("…")).toBe(true);
+    expect(title).not.toContain("  ");
+  });
+
+  it("rejects truncated responses instead of saving a partial title", async () => {
+    const create = mock(async (_request: any) => ({
+      status: "incomplete",
+      incomplete_details: { reason: "max_output_tokens" },
+      output_text: "Lös",
+    }));
+
+    const title = await generateConversationTitle("TSRT22", "Fråga", "Svar", {
+      responses: { create },
+    } as any);
+
+    expect(title).toBeNull();
+  });
+
+  it("rejects implausibly short titles even from completed responses", async () => {
+    const create = mock(async (_request: any) => ({
+      status: "completed",
+      output_text: "Lös",
+    }));
+
+    const title = await generateConversationTitle("TSRT22", "Fråga", "Svar", {
+      responses: { create },
+    } as any);
+
+    expect(title).toBeNull();
   });
 });
