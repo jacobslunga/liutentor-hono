@@ -116,7 +116,10 @@ chat.post(
 
     const anonymousUserId = c.req.header("x-anonymous-user-id") || "unknown";
     const userId = await getAuthenticatedUserId(c.req.header("Authorization"));
-    let shouldGenerateTitle = false;
+    // Anonymous chats have no row to check, so the title rides on the stream
+    // only. The history-length guard keeps a client from paying for a title
+    // call on every turn by always claiming it is the first message.
+    let shouldGenerateTitle = !!isFirstMessage && messages.length === 1;
 
     if (conversationId) {
       if (!userId) {
@@ -132,6 +135,7 @@ chat.post(
           .eq("conversation_id", conversationId);
         if (error) {
           console.error("Conversation title eligibility error:", error.message);
+          shouldGenerateTitle = false;
         } else {
           shouldGenerateTitle = count === 0;
         }
@@ -285,11 +289,12 @@ chat.post(
           await emit(event);
         }
 
+        // The plaintext protocol has nowhere to put a title, and only a stored
+        // conversation needs one without the stream.
         if (
-          userId &&
-          conversationId &&
           shouldGenerateTitle &&
-          fullResponse.trim()
+          fullResponse.trim() &&
+          (wantsEvents || (userId && conversationId))
         ) {
           try {
             const title = await generateConversationTitle(
@@ -298,16 +303,22 @@ chat.post(
               fullResponse,
             );
             if (title) {
-              const { error } = await supabase
-                .from("conversations")
-                .update({ title })
-                .eq("id", conversationId)
-                .eq("user_id", userId);
-              if (error) {
-                console.error("Conversation title update error:", error.message);
-              } else if (wantsEvents) {
-                await sendEvent("title", { title });
+              let saved = true;
+              if (userId && conversationId) {
+                const { error } = await supabase
+                  .from("conversations")
+                  .update({ title })
+                  .eq("id", conversationId)
+                  .eq("user_id", userId);
+                if (error) {
+                  saved = false;
+                  console.error(
+                    "Conversation title update error:",
+                    error.message,
+                  );
+                }
               }
+              if (saved && wantsEvents) await sendEvent("title", { title });
             }
           } catch (error) {
             // A title is decorative; never fail an otherwise successful answer.
