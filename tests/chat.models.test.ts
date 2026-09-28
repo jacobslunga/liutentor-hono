@@ -143,7 +143,7 @@ describe("OpenAI chat streaming", () => {
       "Fråga",
       undefined,
       "exam:solution",
-      false,
+      {},
       "high",
       { responses: { create } } as any,
     )) {
@@ -163,6 +163,67 @@ describe("OpenAI chat streaming", () => {
     const request = create.mock.calls[0]![0] as any;
     expect(request.prompt_cache_key.length).toBeLessThanOrEqual(64);
     expect(request).not.toHaveProperty("tools");
+  });
+
+  it("searches course material and cites files", async () => {
+    const create = mock(async (_request: any) =>
+      (async function* () {
+        yield { type: "response.file_search_call.searching" };
+        yield { type: "response.file_search_call.completed" };
+        yield {
+          type: "response.output_text.annotation.added",
+          annotation: {
+            type: "file_citation",
+            file_id: "file-abc",
+            filename: "Föreläsning 3.pdf",
+            index: 0,
+          },
+        };
+        yield {
+          type: "response.output_text.annotation.added",
+          annotation: {
+            type: "file_citation",
+            file_id: "file-abc",
+            filename: "Föreläsning 3.pdf",
+            index: 1,
+          },
+        };
+        yield { type: "response.output_text.delta", delta: "Svar" };
+      })(),
+    );
+
+    const events: any[] = [];
+    for await (const event of streamOpenAIResponse(
+      "Systemprompt",
+      [{ role: "user", content: "Fråga" }],
+      LUNA_CHAT_MODEL_ID,
+      [],
+      [],
+      "Fråga",
+      undefined,
+      undefined,
+      { vectorStoreId: "vs_123" },
+      "medium",
+      { responses: { create } } as any,
+    )) {
+      events.push(event);
+    }
+
+    const request = create.mock.calls[0]![0] as any;
+    expect(request.tools).toEqual([
+      { type: "file_search", vector_store_ids: ["vs_123"], max_num_results: 8 },
+    ]);
+    expect(events).toEqual([
+      { type: "status", step: "searching", message: "Söker i kursmaterialet" },
+      { type: "status", step: "search_done", message: "Läser material" },
+      { type: "text", delta: "Svar" },
+      {
+        type: "sources",
+        items: [
+          { type: "file", title: "Föreläsning 3.pdf", fileId: "file-abc" },
+        ],
+      },
+    ]);
   });
 
   it("adds web search only when requested and emits status and sources", async () => {
@@ -192,7 +253,7 @@ describe("OpenAI chat streaming", () => {
       "Fråga",
       undefined,
       undefined,
-      true,
+      { webSearch: true },
       "medium",
       { responses: { create } } as any,
     )) {

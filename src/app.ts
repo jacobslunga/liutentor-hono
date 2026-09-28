@@ -5,6 +5,7 @@ import { LRUCache } from "lru-cache";
 import { supabaseMiddleware } from "~/db/supabase";
 import chat from "~/api/v1/chat.routes";
 import quiz from "~/api/v1/quiz.route";
+import studyCourses from "~/api/v1/study-courses.routes";
 import { fail } from "~/utils/response";
 import { logRateLimitBlock } from "~/utils/rate.limit";
 
@@ -76,6 +77,7 @@ app.use(supabaseMiddleware);
 
 app.route("/", chat);
 app.route("/", quiz);
+app.route("/", studyCourses);
 
 export default {
   port: process.env.PORT || 3001,
