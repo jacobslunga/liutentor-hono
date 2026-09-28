@@ -1,101 +1,82 @@
-import { SYSTEM_PROMPT, WEB_SEARCH_PROMPT } from "~/utils/prompts";
+import {
+  LEARN_SYSTEM_PROMPT,
+  LEARN_WEB_SEARCH_PROMPT,
+  SYSTEM_PROMPT,
+  WEB_SEARCH_PROMPT,
+  courseContextPrompt,
+} from "~/utils/prompts";
 import { SKILL_PROMPTS } from "~/utils/skills";
-import { chatMessageSchema, examIdSchema } from "./chat.schemas";
-import { validateChatAttachments } from "./chat.attachments";
+import {
+  chatMessageSchema,
+  examIdSchema,
+  learnMessageSchema,
+} from "./chat.schemas";
 import { bodyLimit } from "hono/body-limit";
 import { timeout } from "hono/timeout";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { stream } from "hono/streaming";
-import { supabase } from "~/db/supabase";
-import {
-  generateConversationTitle,
-  streamOpenAIResponse,
-  PdfData,
-  ChatStreamEvent,
-} from "~/utils/chat.utils";
+import { streamOpenAIResponse, PdfData } from "~/utils/chat.utils";
 import { getModelConfig, getModelLogId } from "./chat.models";
 import { fetchPdfAsBase64 } from "~/utils/pdf.cache";
 import { rateLimitByIdentity } from "~/utils/rate.limit";
 import {
-  getAuthenticatedUserId,
-  assertConversationOwnership,
-} from "~/utils/auth";
-
-function extractTextContent(content: unknown): string {
-  if (Array.isArray(content)) {
-    const textPart = content.find(
-      (part: any) => part?.type === "text" && typeof part?.text === "string",
-    );
-    return textPart?.text || "";
-  }
-  return typeof content === "string" ? content : "";
-}
-
-function logToDBAsync(payload: any) {
-  supabase
-    .from("ai_chat_logs")
-    .insert(payload)
-    .then(({ error }) => {
-      if (error) console.error("DB Log Error:", error.message);
-    });
-}
+  extractTextContent,
+  logToDBAsync,
+  readChatForm,
+  resolveChatIdentity,
+  streamChatResponse,
+} from "./chat.handler";
 
 const chat = new Hono().basePath("/v1/chat");
 
+// ~12/min is roughly 10x the fastest real usage: the p25 gap between turns in
+// a session is 54s, so even an intense student sits near 1/min. Both chat
+// routes share the bucket, so a student gets the same budget either way.
+const chatRateLimit = () =>
+  rateLimitByIdentity({ windowMs: 60_000, max: 12, name: "chat" });
+
+/** Resolves the tier and refuses the deep tier to anonymous users. */
+function resolveModel(modelId: string | undefined, userId: string | null) {
+  const modelConfig = getModelConfig(modelId);
+  if (modelConfig.requiresAuth && !userId) {
+    throw new HTTPException(403, {
+      message: "Den här tankenivån kräver att du är inloggad",
+    });
+  }
+  return { modelConfig, modelLogId: getModelLogId(modelConfig) };
+}
+
+function logRequest(rows: [string, string][]) {
+  const cyan = "\x1b[36m";
+  const dim = "\x1b[2m";
+  const reset = "\x1b[0m";
+  const bold = "\x1b[1m";
+  const width = Math.max(...rows.map(([label]) => label.length));
+  console.log(
+    `${cyan}┌─ CHAT REQUEST ${"─".repeat(35)}\n` +
+      rows
+        .map(
+          ([label, value], i) =>
+            `${i ? `${cyan}│` : "│"}${reset}  ${bold}${label.padEnd(width)}${reset} ${dim}→${reset}  ${value}\n`,
+        )
+        .join("") +
+      `${cyan}└${"─".repeat(50)}${reset}`,
+  );
+}
+
 chat.post(
   "/completion/:examId",
-  // ~12/min is roughly 10x the fastest real usage: the p25 gap between turns in
-  // a session is 54s, so even an intense student sits near 1/min.
-  rateLimitByIdentity({ windowMs: 60_000, max: 12, name: "chat" }),
+  chatRateLimit(),
   zValidator("param", examIdSchema),
   bodyLimit({ maxSize: 22 * 1024 * 1024 }),
   timeout(120000),
   async (c) => {
     const { examId } = c.req.valid("param");
-    const contentType = c.req.header("content-type") ?? "";
-    if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
-      throw new HTTPException(415, {
-        message: "Chat requests must use multipart/form-data",
-      });
-    }
-
-    let formData: FormData;
-    try {
-      formData = await c.req.formData();
-    } catch {
-      throw new HTTPException(400, { message: "Malformed multipart request" });
-    }
-
-    const payload = formData.get("payload");
-    if (typeof payload !== "string") {
-      throw new HTTPException(400, { message: "Missing chat payload" });
-    }
-
-    let parsedPayload: unknown;
-    try {
-      parsedPayload = JSON.parse(payload);
-    } catch {
-      throw new HTTPException(400, { message: "Invalid chat payload" });
-    }
-
-    const validation = chatMessageSchema.safeParse(parsedPayload);
-    if (!validation.success) {
-      throw new HTTPException(400, {
-        message: validation.error.issues[0]?.message ?? "Invalid chat payload",
-      });
-    }
-
-    const fileFields = formData
-      .getAll("files")
-      .filter((field): field is File => field instanceof File);
-    if (fileFields.length !== formData.getAll("files").length) {
-      throw new HTTPException(400, { message: "Invalid attachment field" });
-    }
-
-    const userAttachments = await validateChatAttachments(fileFields);
-    const body = validation.data;
+    const { body, attachments: userAttachments } = await readChatForm(
+      c,
+      chatMessageSchema,
+    );
 
     const {
       messages,
@@ -114,51 +95,16 @@ chat.post(
       throw new HTTPException(400, { message: "Missing examUrl or messages" });
     }
 
-    const anonymousUserId = c.req.header("x-anonymous-user-id") || "unknown";
-    const userId = await getAuthenticatedUserId(c.req.header("Authorization"));
-    // Anonymous chats have no row to check, so the title rides on the stream
-    // only. The history-length guard keeps a client from paying for a title
-    // call on every turn by always claiming it is the first message.
-    let shouldGenerateTitle = !!isFirstMessage && messages.length === 1;
+    const identity = await resolveChatIdentity(c, {
+      conversationId,
+      isFirstMessage,
+      messageCount: messages.length,
+    });
+    const { userId, anonymousUserId } = identity;
 
-    if (conversationId) {
-      if (!userId) {
-        throw new HTTPException(401, {
-          message: "Authentication required for conversations",
-        });
-      }
-      await assertConversationOwnership(conversationId, userId);
-      if (isFirstMessage) {
-        const { count, error } = await supabase
-          .from("ai_chat_logs")
-          .select("id", { count: "exact", head: true })
-          .eq("conversation_id", conversationId);
-        if (error) {
-          console.error("Conversation title eligibility error:", error.message);
-          shouldGenerateTitle = false;
-        } else {
-          shouldGenerateTitle = count === 0;
-        }
-      }
-    }
-
-    const modelConfig = getModelConfig(modelId);
-    const {
-      provider,
-      modelId: resolvedModelId,
-      effort,
-      requiresAuth,
-      supportsWebSearch,
-    } = modelConfig;
-    const modelLogId = getModelLogId(modelConfig);
-
-    const webSearch = !!requestedWebSearch && !!supportsWebSearch;
-
-    if (requiresAuth && !userId) {
-      throw new HTTPException(403, {
-        message: "Den här tankenivån kräver att du är inloggad",
-      });
-    }
+    const { modelConfig, modelLogId } = resolveModel(modelId, userId);
+    const { provider, modelId: resolvedModelId, effort } = modelConfig;
+    const webSearch = !!requestedWebSearch && !!modelConfig.supportsWebSearch;
 
     const lastMsgText = extractTextContent(
       messages[messages.length - 1]?.content,
@@ -186,22 +132,16 @@ chat.post(
       solutionUrl ? fetchPdfAsBase64(solutionUrl) : Promise.resolve(null),
     ]);
 
-    const cyan = "\x1b[36m";
-    const dim = "\x1b[2m";
-    const reset = "\x1b[0m";
-    const bold = "\x1b[1m";
-    console.log(
-      `${cyan}┌─ CHAT REQUEST ${"─".repeat(35)}\n` +
-        `│${reset}  ${bold}Course${reset}   ${dim}→${reset}  ${courseCode ?? "unknown"}\n` +
-        `${cyan}│${reset}  ${bold}Exam ID${reset}  ${dim}→${reset}  ${examId}\n` +
-        `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${resolvedModelId}  ${dim}(${provider}, ${effort})${reset}\n` +
-        `${cyan}│${reset}  ${bold}Messages${reset} ${dim}→${reset}  ${messages.length}\n` +
-        `${cyan}│${reset}  ${bold}Facit${reset}    ${dim}→${reset}  ${solutionUrl ? "yes" : "no"}\n` +
-        `${cyan}│${reset}  ${bold}Files${reset}    ${dim}→${reset}  ${userAttachments.length}\n` +
-        `${cyan}│${reset}  ${bold}Webb${reset}     ${dim}→${reset}  ${webSearch ? "on" : "off"}\n` +
-        `${cyan}│${reset}  ${bold}User${reset}     ${dim}→${reset}  ${dim}${userId ?? `anon:${anonymousUserId}`}${reset}\n` +
-        `${cyan}└${"─".repeat(50)}${reset}`,
-    );
+    logRequest([
+      ["Course", courseCode ?? "unknown"],
+      ["Exam ID", examId],
+      ["Model", `${resolvedModelId}  (${provider}, ${effort})`],
+      ["Messages", String(messages.length)],
+      ["Facit", solutionUrl ? "yes" : "no"],
+      ["Files", String(userAttachments.length)],
+      ["Webb", webSearch ? "on" : "off"],
+      ["User", userId ?? `anon:${anonymousUserId}`],
+    ]);
 
     const pdfs: PdfData[] = [];
     if (examBase64) {
@@ -230,128 +170,135 @@ chat.post(
 
     const cacheKey = `${examUrl}:${solutionUrl || ""}`;
 
-    const responseStream = streamOpenAIResponse(
-      systemPrompt,
-      messages,
-      resolvedModelId,
-      pdfs,
-      userAttachments,
-      modelLastMsgText,
-      selectionContext,
-      cacheKey,
-      webSearch,
-      effort,
-    );
-
-    // Status and source events need a frame to travel in, but a browser holding a
-    // cached bundle still speaks the old concatenate-the-bytes protocol. Serving
-    // both off the same generator lets the two repos deploy independently; the
-    // plaintext branch can be deleted once no client asks for it.
-    const wantsEvents = (c.req.header("accept") ?? "").includes(
-      "text/event-stream",
-    );
-
-    if (wantsEvents) {
-      c.header("Content-Type", "text/event-stream; charset=utf-8");
-      c.header("Cache-Control", "no-cache");
-      c.header("Connection", "keep-alive");
-      // Cloud Run buffers a response it thinks it can compress, which would hold
-      // every status event until the turn finished — exactly backwards.
-      c.header("X-Accel-Buffering", "no");
-    } else {
-      c.header("Content-Type", "text/plain; charset=utf-8");
-      c.header("Transfer-Encoding", "chunked");
-    }
-
-    return stream(c, async (s) => {
-      let fullResponse = "";
-
-      const sendEvent = async (type: string, data: unknown) => {
-        await s.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
-      };
-
-      const emit = async (event: ChatStreamEvent) => {
-        if (event.type === "text") {
-          fullResponse += event.delta;
-          if (!wantsEvents) {
-            await s.write(event.delta);
-            return;
-          }
-        } else if (!wantsEvents) {
-          // The plaintext protocol has nowhere to put anything but text.
-          return;
-        }
-        await sendEvent(event.type, event);
-      };
-
-      try {
-        for await (const event of responseStream) {
-          await emit(event);
-        }
-
-        // The plaintext protocol has nowhere to put a title, and only a stored
-        // conversation needs one without the stream.
-        if (
-          shouldGenerateTitle &&
-          fullResponse.trim() &&
-          (wantsEvents || (userId && conversationId))
-        ) {
-          try {
-            const title = await generateConversationTitle(
-              courseCode,
-              lastMsgText,
-              fullResponse,
-            );
-            if (title) {
-              let saved = true;
-              if (userId && conversationId) {
-                const { error } = await supabase
-                  .from("conversations")
-                  .update({ title })
-                  .eq("id", conversationId)
-                  .eq("user_id", userId);
-                if (error) {
-                  saved = false;
-                  console.error(
-                    "Conversation title update error:",
-                    error.message,
-                  );
-                }
-              }
-              if (saved && wantsEvents) await sendEvent("title", { title });
-            }
-          } catch (error) {
-            // A title is decorative; never fail an otherwise successful answer.
-            console.error("Conversation title generation error:", error);
-          }
-        }
-
-        if (wantsEvents) await sendEvent("done", {});
-      } catch (error: any) {
-        console.error("Streaming error:", error);
-        // Once bytes are on the wire an HTTP status can no longer say anything,
-        // so a framed client gets a real error frame instead of a truncated turn.
-        if (wantsEvents) {
-          await sendEvent("error", {
-            message: "Något gick fel. Försök igen senare.",
-          });
-        } else {
-          throw new HTTPException(500, {
-            message: "Failed while streaming response",
-          });
-        }
-      }
-
-      logToDBAsync({
+    return streamChatResponse(c, {
+      responseStream: streamOpenAIResponse(
+        systemPrompt,
+        messages,
+        resolvedModelId,
+        pdfs,
+        userAttachments,
+        modelLastMsgText,
+        selectionContext,
+        cacheKey,
+        webSearch,
+        effort,
+      ),
+      identity,
+      conversationId,
+      titleCourseCode: courseCode,
+      lastMsgText,
+      logFields: {
         user_id: userId,
         conversation_id: conversationId || null,
         anonymous_user_id: anonymousUserId,
         course_code: courseCode,
         exam_id: examId,
-        role: "assistant",
-        content: fullResponse,
         model: modelLogId,
-      });
+      },
+    });
+  },
+);
+
+/**
+ * The standalone learning chat. No exam is attached; courses referenced with
+ * "@TATA41" are named in the prompt and turn on web search so the model can
+ * look up what the course covers.
+ */
+chat.post(
+  "/learn",
+  chatRateLimit(),
+  bodyLimit({ maxSize: 22 * 1024 * 1024 }),
+  timeout(120000),
+  async (c) => {
+    const { body, attachments: userAttachments } = await readChatForm(
+      c,
+      learnMessageSchema,
+    );
+
+    const {
+      messages,
+      courses = [],
+      conversationId,
+      isFirstMessage,
+      modelId,
+      selectionContext,
+      webSearch: requestedWebSearch,
+    } = body;
+
+    const identity = await resolveChatIdentity(c, {
+      conversationId,
+      isFirstMessage,
+      messageCount: messages.length,
+    });
+    const { userId, anonymousUserId } = identity;
+
+    const { modelConfig, modelLogId } = resolveModel(modelId, userId);
+    const { provider, modelId: resolvedModelId, effort } = modelConfig;
+    const webSearch =
+      (!!requestedWebSearch || courses.length > 0) &&
+      !!modelConfig.supportsWebSearch;
+
+    const courseCode = courses.map((course) => course.code).join(",");
+    const lastMsgText = extractTextContent(
+      messages[messages.length - 1]?.content,
+    );
+
+    logToDBAsync({
+      user_id: userId,
+      conversation_id: conversationId || null,
+      anonymous_user_id: anonymousUserId,
+      course_code: courseCode || null,
+      exam_id: null,
+      role: "user",
+      content: lastMsgText,
+      model: modelLogId,
+      selection_context: selectionContext || null,
+      web_search: webSearch,
+    });
+
+    logRequest([
+      ["Kind", "learn"],
+      ["Courses", courseCode || "none"],
+      ["Model", `${resolvedModelId}  (${provider}, ${effort})`],
+      ["Messages", String(messages.length)],
+      ["Files", String(userAttachments.length)],
+      ["Webb", webSearch ? "on" : "off"],
+      ["User", userId ?? `anon:${anonymousUserId}`],
+    ]);
+
+    let systemPrompt = LEARN_SYSTEM_PROMPT;
+    if (webSearch) systemPrompt += LEARN_WEB_SEARCH_PROMPT;
+    systemPrompt += courseContextPrompt(courses);
+
+    const modelLastMsgText =
+      lastMsgText.trim() ||
+      "Hjälp mig att förstå och arbeta med det bifogade materialet.";
+
+    return streamChatResponse(c, {
+      responseStream: streamOpenAIResponse(
+        systemPrompt,
+        messages,
+        resolvedModelId,
+        [],
+        userAttachments,
+        modelLastMsgText,
+        selectionContext,
+        undefined,
+        webSearch,
+        effort,
+      ),
+      identity,
+      conversationId,
+      titleCourseCode: courseCode,
+      lastMsgText,
+      logFields: {
+        user_id: userId,
+        conversation_id: conversationId || null,
+        anonymous_user_id: anonymousUserId,
+        course_code: courseCode || null,
+        exam_id: null,
+        model: modelLogId,
+      },
     });
   },
 );
