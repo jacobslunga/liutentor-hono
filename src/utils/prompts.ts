@@ -94,6 +94,25 @@ export const LEARN_WEB_SEARCH_PROMPT = `
 - Om du söker: nämn kort var uppgiften kommer ifrån i löpande text, och skriv aldrig ut råa URL:er som egna stycken.
 `;
 
+/**
+ * A chat inside one of the student's own study courses. `hasMaterial` says
+ * whether file search over the uploaded lectures is available this turn.
+ */
+export function studyCoursePrompt(name: string, hasMaterial: boolean): string {
+  return `
+
+# Studiekurs
+
+Samtalet hör till studentens egen kurs "${name.replace(/"/g, "'")}".
+${
+  hasMaterial
+    ? `- Studenten har laddat upp kursmaterial (t.ex. föreläsningar) som du kan söka i. Sök i materialet först när frågan rör kursens innehåll, och grunda svaret i det.
+- Hänvisa till materialet när du använder det, t.ex. "enligt föreläsning 3". Hitta aldrig på innehåll som inte står där; säg hellre att materialet inte tar upp det.`
+    : `- Inget kursmaterial är uppladdat än. Svara utifrån allmän kunskap, och nämn gärna att studenten kan ladda upp föreläsningar till kursen för mer träffsäkra svar när det är relevant.`
+}
+`;
+}
+
 export interface CourseRef {
   code: string;
   name?: string;

@@ -9,6 +9,7 @@ import {
 } from "~/utils/auth";
 import {
   generateConversationTitle,
+  stripCitationMarkers,
   type ChatStreamEvent,
 } from "~/utils/chat.utils";
 import {
@@ -136,8 +137,59 @@ export async function resolveChatIdentity(
   return { userId, anonymousUserId, shouldGenerateTitle };
 }
 
+/** Noted on an answer the student stopped, matching what the app shows. */
+const CANCELLED_NOTE = "> *Avbruten av användaren*";
+
+/**
+ * Turns being generated on this instance, by the id the app sends, so the
+ * Stop button can end one. Leaving the page does not: the answer is finished
+ * and saved either way. (With several instances a cancel can miss; the turn
+ * then simply completes.)
+ */
+const activeTurns = new Map<
+  string,
+  { controller: AbortController; owner: string }
+>();
+
+export interface ChatTurn {
+  signal: AbortSignal;
+  /** Forgets the turn; call once it is done. */
+  end: () => void;
+}
+
+/** Registers a turn under `turnId` (when the app sent one). */
+export function startTurn(turnId: string | undefined, owner: string): ChatTurn {
+  const controller = new AbortController();
+  if (turnId) activeTurns.set(turnId, { controller, owner });
+  return {
+    signal: controller.signal,
+    end: () => {
+      if (turnId && activeTurns.get(turnId)?.controller === controller)
+        activeTurns.delete(turnId);
+    },
+  };
+}
+
+/** Stops a running turn if `owner` started it. True when one was stopped. */
+export function cancelTurn(turnId: string, owner: string): boolean {
+  const turn = activeTurns.get(turnId);
+  if (!turn || turn.owner !== owner) return false;
+  turn.controller.abort();
+  activeTurns.delete(turnId);
+  return true;
+}
+
+/** Who a turn belongs to: the user, or the anonymous browser id. */
+export const turnOwner = ({
+  userId,
+  anonymousUserId,
+}: Pick<ChatIdentity, "userId" | "anonymousUserId">) =>
+  userId ?? `anon:${anonymousUserId}`;
+
 export interface StreamChatOptions {
   responseStream: AsyncGenerator<ChatStreamEvent>;
+  /** Aborted only by an explicit cancel, never by the client going away. */
+  turn: ChatTurn;
   identity: ChatIdentity;
   conversationId?: string | null;
   /** Course label handed to the title model; may be empty. */
@@ -155,6 +207,7 @@ export function streamChatResponse(c: Context, opts: StreamChatOptions) {
     titleCourseCode,
     lastMsgText,
     logFields,
+    turn,
   } = opts;
 
   // Status and source events need a frame to travel in, but a browser holding a
@@ -179,16 +232,43 @@ export function streamChatResponse(c: Context, opts: StreamChatOptions) {
 
   return stream(c, async (s) => {
     let fullResponse = "";
+    let sources: unknown[] = [];
+    // The answer is generated and saved whether or not anyone is still
+    // listening: a student who leaves the chat finds it there when they come
+    // back. A gone client only means we stop writing to it.
+    let clientGone = false;
+    s.onAbort(() => {
+      clientGone = true;
+    });
+    const write = async (chunk: string) => {
+      if (!clientGone) await s.write(chunk);
+    };
 
     const sendEvent = async (type: string, data: unknown) => {
-      await s.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
+      await write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    /** Stopped by the student: keep what was written, marked as stopped. */
+    const saveStopped = () => {
+      fullResponse = stripCitationMarkers(fullResponse);
+      turn.end();
+      logToDBAsync({
+        ...logFields,
+        role: "assistant",
+        content: fullResponse.trim()
+          ? `${fullResponse.trim()}\n\n${CANCELLED_NOTE}`
+          : CANCELLED_NOTE,
+        sources: sources.length ? sources : null,
+      });
     };
 
     const emit = async (event: ChatStreamEvent) => {
+      // Kept for the log row, so the chips come back with the history.
+      if (event.type === "sources") sources = event.items;
       if (event.type === "text") {
         fullResponse += event.delta;
         if (!wantsEvents) {
-          await s.write(event.delta);
+          await write(event.delta);
           return;
         }
       } else if (!wantsEvents) {
@@ -202,13 +282,21 @@ export function streamChatResponse(c: Context, opts: StreamChatOptions) {
       for await (const event of responseStream) {
         await emit(event);
       }
+      // The SDK ends an aborted stream quietly instead of throwing.
+      if (turn.signal.aborted) {
+        saveStopped();
+        return;
+      }
+      fullResponse = stripCitationMarkers(fullResponse);
 
       // The plaintext protocol has nowhere to put a title, and only a stored
       // conversation needs one without the stream.
+      // A title for an anonymous chat only travels on the stream, so it is
+      // pointless once that client has gone.
       if (
         shouldGenerateTitle &&
         fullResponse.trim() &&
-        (wantsEvents || (userId && conversationId))
+        ((wantsEvents && !clientGone) || (userId && conversationId))
       ) {
         try {
           const title = await generateConversationTitle(
@@ -242,6 +330,10 @@ export function streamChatResponse(c: Context, opts: StreamChatOptions) {
 
       if (wantsEvents) await sendEvent("done", {});
     } catch (error: any) {
+      if (turn.signal.aborted) {
+        saveStopped();
+        return;
+      }
       console.error("Streaming error:", error);
       // Once bytes are on the wire an HTTP status can no longer say anything,
       // so a framed client gets a real error frame instead of a truncated turn.
@@ -256,10 +348,12 @@ export function streamChatResponse(c: Context, opts: StreamChatOptions) {
       }
     }
 
+    turn.end();
     logToDBAsync({
       ...logFields,
       role: "assistant",
       content: fullResponse,
+      sources: sources.length ? sources : null,
     });
   });
 }

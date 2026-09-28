@@ -13,9 +13,18 @@ export interface PdfData {
   label: "tenta" | "facit";
 }
 
-export interface ChatSource {
-  title: string;
-  url: string;
+/** A web page, or (with `fileId`) a course file, that an answer cited. */
+export type ChatSource =
+  | { type?: "web"; title: string; url: string }
+  | { type: "file"; title: string; fileId: string };
+
+/** Tools a turn may use; both stay off unless the route turns them on. */
+export interface ChatTools {
+  webSearch?: boolean;
+  /** Search this course's vector store. */
+  vectorStoreId?: string | null;
+  /** Stops generation (the student pressed Stop). */
+  signal?: AbortSignal;
 }
 
 export type ChatStreamEvent =
@@ -23,6 +32,17 @@ export type ChatStreamEvent =
   | { type: "status"; step: "searching" | "search_done"; message: string }
   | { type: "sources"; items: ChatSource[] }
   | { type: "title"; title: string };
+
+/**
+ * Inline citation markers file search can leave in the answer, e.g.
+ * "\uE200filecite\uE202turn0file1\uE201". The cited files travel as
+ * annotations instead, so the markers are dropped before anything is saved.
+ */
+export function stripCitationMarkers(text: string): string {
+  return text
+    .replace(/\uE200[^\uE201]*(?:\uE201|$)/g, "")
+    .replace(/[\uE200-\uE202]/g, "");
+}
 
 const MAX_CONVERSATION_TITLE_LENGTH = 60;
 const MIN_CONVERSATION_TITLE_LENGTH = 8;
@@ -182,11 +202,26 @@ async function* streamOpenAIResponse(
   lastMsgText: string,
   selectionContext?: string,
   cacheKey?: string,
-  webSearch = false,
+  { webSearch = false, vectorStoreId = null, signal }: ChatTools = {},
   effort: ReasoningEffort = "medium",
   client: Pick<OpenAI, "responses"> = openai,
 ): AsyncGenerator<ChatStreamEvent> {
-  const responseStream = await client.responses.create({
+  const tools = [
+    ...(webSearch
+      ? [{ type: "web_search" as const, search_context_size: "low" as const }]
+      : []),
+    ...(vectorStoreId
+      ? [
+          {
+            type: "file_search" as const,
+            vector_store_ids: [vectorStoreId],
+            max_num_results: 8,
+          },
+        ]
+      : []),
+  ];
+
+  const request = {
     model: modelId,
     instructions: systemPrompt,
     input: buildOpenAIInput(
@@ -199,16 +234,13 @@ async function* streamOpenAIResponse(
     max_output_tokens: 16000,
     reasoning: { effort },
     ...(cacheKey ? { prompt_cache_key: toPromptCacheKey(cacheKey) } : {}),
-    ...(webSearch
-      ? {
-          tools: [
-            { type: "web_search" as const, search_context_size: "low" as const },
-          ],
-        }
-      : {}),
-    store: false,
-    stream: true,
-  });
+    ...(tools.length ? { tools } : {}),
+    store: false as const,
+    stream: true as const,
+  };
+  const responseStream = signal
+    ? await client.responses.create(request, { signal })
+    : await client.responses.create(request);
 
   const sources = new Map<string, ChatSource>();
   let searching = false;
@@ -227,14 +259,48 @@ async function* streamOpenAIResponse(
         yield { type: "status", step: "search_done", message: "Läser källor" };
         break;
 
+      case "response.file_search_call.in_progress":
+      case "response.file_search_call.searching":
+        if (searching) break;
+        searching = true;
+        yield {
+          type: "status",
+          step: "searching",
+          message: "Söker i kursmaterialet",
+        };
+        break;
+
+      case "response.file_search_call.completed":
+        searching = false;
+        yield { type: "status", step: "search_done", message: "Läser material" };
+        break;
+
       case "response.output_text.annotation.added": {
-        const annotation = event.annotation;
-        if (annotation?.type !== "url_citation" || !annotation.url) break;
-        if (!sources.has(annotation.url)) {
-          sources.set(annotation.url, {
-            title: annotation.title || annotation.url,
-            url: annotation.url,
-          });
+        const annotation = event.annotation as
+          | {
+              type?: string;
+              url?: string;
+              title?: string;
+              file_id?: string;
+              filename?: string;
+            }
+          | undefined;
+        if (annotation?.type === "url_citation" && annotation.url) {
+          if (!sources.has(annotation.url)) {
+            sources.set(annotation.url, {
+              title: annotation.title || annotation.url,
+              url: annotation.url,
+            });
+          }
+        } else if (annotation?.type === "file_citation" && annotation.file_id) {
+          const key = `file:${annotation.file_id}`;
+          if (!sources.has(key)) {
+            sources.set(key, {
+              type: "file",
+              title: annotation.filename || "Kursmaterial",
+              fileId: annotation.file_id,
+            });
+          }
         }
         break;
       }

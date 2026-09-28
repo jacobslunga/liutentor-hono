@@ -40,6 +40,8 @@ export const chatMessageSchema = z.object({
   selectionContext: z.string().max(2000).optional(),
   webSearch: z.boolean().optional(),
   skill: z.enum(SKILL_IDS).optional(),
+  /** Lets the app stop this turn with POST /turns/:turnId/cancel. */
+  turnId: z.uuid().optional(),
 });
 
 /**
@@ -57,11 +59,14 @@ export const learnMessageSchema = z.object({
     )
     .max(3, "Too many courses")
     .optional(),
+  /** A study course the chat belongs to; its material is searched. */
+  courseId: z.uuid().optional().nullable(),
   isFirstMessage: z.boolean().optional(),
   modelId: z.string().optional(),
   conversationId: z.uuid().optional().nullable(),
   selectionContext: z.string().max(2000).optional(),
   webSearch: z.boolean().optional(),
+  turnId: z.uuid().optional(),
 });
 
 /**

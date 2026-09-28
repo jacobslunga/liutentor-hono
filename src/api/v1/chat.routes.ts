@@ -4,7 +4,9 @@ import {
   SYSTEM_PROMPT,
   WEB_SEARCH_PROMPT,
   courseContextPrompt,
+  studyCoursePrompt,
 } from "~/utils/prompts";
+import { courseChatContext } from "~/utils/course-material";
 import { SKILL_PROMPTS } from "~/utils/skills";
 import {
   chatMessageSchema,
@@ -21,12 +23,17 @@ import { getModelConfig, getModelLogId } from "./chat.models";
 import { fetchPdfAsBase64 } from "~/utils/pdf.cache";
 import { rateLimitByIdentity } from "~/utils/rate.limit";
 import {
+  cancelTurn,
   extractTextContent,
   logToDBAsync,
   readChatForm,
   resolveChatIdentity,
+  startTurn,
   streamChatResponse,
+  turnOwner,
 } from "./chat.handler";
+import { getAuthenticatedUserId } from "~/utils/auth";
+import { z } from "zod";
 
 const chat = new Hono().basePath("/v1/chat");
 
@@ -89,6 +96,7 @@ chat.post(
       selectionContext,
       webSearch: requestedWebSearch,
       skill,
+      turnId,
     } = body;
 
     if (!examUrl || !messages?.length) {
@@ -169,6 +177,7 @@ chat.post(
       "Hjälp mig att förstå och arbeta med det bifogade materialet.";
 
     const cacheKey = `${examUrl}:${solutionUrl || ""}`;
+    const examTurn = startTurn(turnId, turnOwner(identity));
 
     return streamChatResponse(c, {
       responseStream: streamOpenAIResponse(
@@ -180,10 +189,11 @@ chat.post(
         modelLastMsgText,
         selectionContext,
         cacheKey,
-        webSearch,
+        { webSearch, signal: examTurn.signal },
         effort,
       ),
       identity,
+      turn: examTurn,
       conversationId,
       titleCourseCode: courseCode,
       lastMsgText,
@@ -218,11 +228,13 @@ chat.post(
     const {
       messages,
       courses = [],
+      courseId,
       conversationId,
       isFirstMessage,
       modelId,
       selectionContext,
       webSearch: requestedWebSearch,
+      turnId,
     } = body;
 
     const identity = await resolveChatIdentity(c, {
@@ -232,11 +244,19 @@ chat.post(
     });
     const { userId, anonymousUserId } = identity;
 
+    // Study courses are private to their owner, so they need a signed-in user.
+    if (courseId && !userId) {
+      throw new HTTPException(401, { message: "Logga in för att använda kurser" });
+    }
+    const studyCourse =
+      courseId && userId ? await courseChatContext(courseId, userId) : null;
+
     const { modelConfig, modelLogId } = resolveModel(modelId, userId);
     const { provider, modelId: resolvedModelId, effort } = modelConfig;
     const webSearch =
       (!!requestedWebSearch || courses.length > 0) &&
       !!modelConfig.supportsWebSearch;
+    const vectorStoreId = studyCourse?.vectorStoreId ?? null;
 
     const courseCode = courses.map((course) => course.code).join(",");
     const lastMsgText = extractTextContent(
@@ -259,6 +279,7 @@ chat.post(
     logRequest([
       ["Kind", "learn"],
       ["Courses", courseCode || "none"],
+      ["Study", studyCourse ? `${studyCourse.name}${vectorStoreId ? " (material)" : ""}` : "none"],
       ["Model", `${resolvedModelId}  (${provider}, ${effort})`],
       ["Messages", String(messages.length)],
       ["Files", String(userAttachments.length)],
@@ -269,10 +290,14 @@ chat.post(
     let systemPrompt = LEARN_SYSTEM_PROMPT;
     if (webSearch) systemPrompt += LEARN_WEB_SEARCH_PROMPT;
     systemPrompt += courseContextPrompt(courses);
+    if (studyCourse) {
+      systemPrompt += studyCoursePrompt(studyCourse.name, !!vectorStoreId);
+    }
 
     const modelLastMsgText =
       lastMsgText.trim() ||
       "Hjälp mig att förstå och arbeta med det bifogade materialet.";
+    const learnTurn = startTurn(turnId, turnOwner(identity));
 
     return streamChatResponse(c, {
       responseStream: streamOpenAIResponse(
@@ -284,10 +309,11 @@ chat.post(
         modelLastMsgText,
         selectionContext,
         undefined,
-        webSearch,
+        { webSearch, vectorStoreId, signal: learnTurn.signal },
         effort,
       ),
       identity,
+      turn: learnTurn,
       conversationId,
       titleCourseCode: courseCode,
       lastMsgText,
@@ -300,6 +326,24 @@ chat.post(
         model: modelLogId,
       },
     });
+  },
+);
+
+/**
+ * The Stop button. Ends a running turn started by the same user (or the same
+ * anonymous browser); leaving the page never does, the answer is kept.
+ */
+chat.post(
+  "/turns/:turnId/cancel",
+  zValidator("param", z.object({ turnId: z.uuid() })),
+  async (c) => {
+    const userId = await getAuthenticatedUserId(c.req.header("Authorization"));
+    const anonymousUserId = c.req.header("x-anonymous-user-id") || "unknown";
+    const cancelled = cancelTurn(
+      c.req.valid("param").turnId,
+      turnOwner({ userId, anonymousUserId }),
+    );
+    return c.json({ success: true, message: "OK", payload: { cancelled } });
   },
 );
 
