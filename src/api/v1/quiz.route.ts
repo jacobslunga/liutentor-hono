@@ -23,7 +23,8 @@ import {
   measureCorrectAnswerLengthBias,
   rebalanceQuizAnswerDistribution,
 } from "./quiz.utils";
-import { logQuizGeneration } from "./quiz.cache";
+import { logQuizGeneration } from "./quiz.log";
+import { fetchPdfAsBase64 } from "~/utils/pdf";
 import { getAuthenticatedUserId } from "~/utils/auth";
 import OpenAI from "openai";
 
@@ -98,21 +99,6 @@ function shuffleArray<T>(items: T[]): T[] {
     [copy[i], copy[j]] = [copy[j], copy[i]];
   }
   return copy;
-}
-
-async function fetchPdfAsBase64(url: string): Promise<string | null> {
-  try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      console.error(`Failed to fetch PDF at ${url}: ${response.statusText}`);
-      return null;
-    }
-    const arrayBuffer = await response.arrayBuffer();
-    return Buffer.from(arrayBuffer).toString("base64");
-  } catch (error) {
-    console.error(`Network error fetching PDF at ${url}:`, error);
-    return null;
-  }
 }
 
 async function getExamSources(courseCode: string, examIds?: number[]) {
@@ -218,8 +204,6 @@ export async function generateQuizFromOpenAI(
 
 quiz.post(
   "/multiple-choice/:courseCode",
-  // Quiz generation is a single expensive call rather than a conversation, so
-  // it needs far less headroom than chat.
   rateLimitByIdentity({ windowMs: 60_000, max: 5, name: "quiz" }),
   zValidator("param", courseCodeSchema),
   zValidator("json", multipleChoiceBodySchema),
@@ -250,13 +234,13 @@ quiz.post(
       const yellow = "\x1b[33m";
       console.log(
         `${cyan}┌─ QUIZ REQUEST ${"─".repeat(35)}\n` +
-        `│${reset}  ${bold}Course${reset}   ${dim}→${reset}  ${courseCode}\n` +
-        `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${QUIZ_MODEL}\n` +
-        `${cyan}│${reset}  ${bold}Exams${reset}    ${dim}→${reset}  ${examIds ? examIds.join(", ") : "random"}\n` +
-        `${cyan}│${reset}  ${bold}Nivå${reset}     ${dim}→${reset}  ${difficulty}\n` +
-        `${cyan}│${reset}  ${bold}Custom${reset}   ${dim}→${reset}  ${customPrompt ? `"${customPrompt.slice(0, 40)}${customPrompt.length > 40 ? "…" : ""}"` : "none"}\n` +
-        `${cyan}│${reset}  ${bold}User${reset}     ${dim}→${reset}  ${dim}${userId ?? `anon:${anonymousUserId}`}${reset}\n` +
-        `${cyan}└${"─".repeat(50)}${reset}`,
+          `│${reset}  ${bold}Course${reset}   ${dim}→${reset}  ${courseCode}\n` +
+          `${cyan}│${reset}  ${bold}Model${reset}    ${dim}→${reset}  ${QUIZ_MODEL}\n` +
+          `${cyan}│${reset}  ${bold}Exams${reset}    ${dim}→${reset}  ${examIds ? examIds.join(", ") : "random"}\n` +
+          `${cyan}│${reset}  ${bold}Nivå${reset}     ${dim}→${reset}  ${difficulty}\n` +
+          `${cyan}│${reset}  ${bold}Custom${reset}   ${dim}→${reset}  ${customPrompt ? `"${customPrompt.slice(0, 40)}${customPrompt.length > 40 ? "…" : ""}"` : "none"}\n` +
+          `${cyan}│${reset}  ${bold}User${reset}     ${dim}→${reset}  ${dim}${userId ?? `anon:${anonymousUserId}`}${reset}\n` +
+          `${cyan}└${"─".repeat(50)}${reset}`,
       );
 
       try {
@@ -332,8 +316,6 @@ quiz.post(
           `rätt svar längst i ${lengthBias.longestCount}/${lengthBias.questionCount} ` +
           `(${Math.round(lengthBias.longestShare * 100)} %, slump ≈ 25 %), ` +
           `längdkvot ${lengthBias.meanLengthRatio.toFixed(2)}`;
-        // Above ~50 % the correct option is guessable on length alone, which
-        // means the option rules in the prompt did not take for this course.
         console.log(
           lengthBias.longestShare > 0.5
             ? `${yellow}⚠  ${biasLine}${reset}`

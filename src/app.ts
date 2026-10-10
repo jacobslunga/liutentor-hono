@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { cors } from "hono/cors";
 import { LRUCache } from "lru-cache";
-import { supabaseMiddleware } from "~/db/supabase";
 import chat from "~/api/v1/chat.routes";
 import quiz from "~/api/v1/quiz.route";
 import studyCourses from "~/api/v1/study-courses.routes";
@@ -72,8 +71,6 @@ app.onError((err, c) => {
 
   return c.json(fail("Internal server error"), 500);
 });
-
-app.use(supabaseMiddleware);
 
 app.route("/", chat);
 app.route("/", quiz);

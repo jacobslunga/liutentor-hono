@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { CHAT_MODEL_IDS } from "./chat.models";
-import { SKILL_IDS } from "~/utils/skills";
 
 const messagesSchema = z
   .array(
@@ -27,9 +26,6 @@ const messagesSchema = z
   .min(1, "At least one message is required")
   .max(100, "Too many messages in conversation");
 
-/**
- * Schema for chat messages
- */
 export const chatMessageSchema = z.object({
   messages: messagesSchema,
   examUrl: z.url(),
@@ -40,15 +36,10 @@ export const chatMessageSchema = z.object({
   conversationId: z.uuid().optional().nullable(),
   selectionContext: z.string().max(2000).optional(),
   webSearch: z.boolean().optional(),
-  skill: z.enum(SKILL_IDS).optional(),
   /** Lets the app stop this turn with POST /turns/:turnId/cancel. */
   turnId: z.uuid().optional(),
 });
 
-/**
- * Schema for the standalone learning chat: no exam, but up to three LiU
- * courses the student referenced with "@TATA41".
- */
 export const learnMessageSchema = z.object({
   messages: messagesSchema,
   courses: z
@@ -60,7 +51,6 @@ export const learnMessageSchema = z.object({
     )
     .max(3, "Too many courses")
     .optional(),
-  /** A study course the chat belongs to; its material is searched. */
   courseId: z.uuid().optional().nullable(),
   isFirstMessage: z.boolean().optional(),
   modelId: z.enum(CHAT_MODEL_IDS),
@@ -70,9 +60,6 @@ export const learnMessageSchema = z.object({
   turnId: z.uuid().optional(),
 });
 
-/**
- * Schema for exam ID parameter
- */
 export const examIdSchema = z.object({
   examId: z
     .string()

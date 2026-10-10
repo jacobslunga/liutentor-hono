@@ -5,11 +5,7 @@ export const MAX_CHAT_ATTACHMENT_SIZE = 5 * 1024 * 1024;
 export const MAX_CHAT_ATTACHMENTS_TOTAL_SIZE = 20 * 1024 * 1024;
 
 export type ChatAttachmentMediaType =
-  | "application/pdf"
-  | "image/jpeg"
-  | "image/png"
-  | "image/webp"
-  | "image/gif";
+  "application/pdf" | "image/jpeg" | "image/png" | "image/webp" | "image/gif";
 
 export interface ValidatedChatAttachment {
   data: string;

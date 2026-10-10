@@ -2,10 +2,7 @@ import { createHash } from "node:crypto";
 import OpenAI from "openai";
 import type { ResponseInput } from "openai/resources/responses/responses";
 import type { ValidatedChatAttachment } from "~/api/v1/chat.attachments";
-import {
-  LUNA_CHAT_MODEL_ID,
-  type ReasoningEffort,
-} from "~/api/v1/chat.models";
+import { LUNA_CHAT_MODEL_ID, type ReasoningEffort } from "~/api/v1/chat.models";
 
 export interface PdfData {
   data: string;
@@ -13,17 +10,13 @@ export interface PdfData {
   label: "tenta" | "facit";
 }
 
-/** A web page, or (with `fileId`) a course file, that an answer cited. */
 export type ChatSource =
   | { type?: "web"; title: string; url: string }
   | { type: "file"; title: string; fileId: string };
 
-/** Tools a turn may use; both stay off unless the route turns them on. */
 export interface ChatTools {
   webSearch?: boolean;
-  /** Search this course's vector store. */
   vectorStoreId?: string | null;
-  /** Stops generation (the student pressed Stop). */
   signal?: AbortSignal;
 }
 
@@ -33,11 +26,6 @@ export type ChatStreamEvent =
   | { type: "sources"; items: ChatSource[] }
   | { type: "title"; title: string };
 
-/**
- * Inline citation markers file search can leave in the answer, e.g.
- * "\uE200filecite\uE202turn0file1\uE201". The cited files travel as
- * annotations instead, so the markers are dropped before anything is saved.
- */
 export function stripCitationMarkers(text: string): string {
   return text
     .replace(/\uE200[^\uE201]*(?:\uE201|$)/g, "")
@@ -74,8 +62,6 @@ export async function generateConversationTitle(
     store: false,
   });
 
-  // Reasoning tokens count toward max_output_tokens. Never persist the visible
-  // fragment of a response that stopped before the title was complete.
   if (response.status !== "completed") return null;
 
   const title = cleanConversationTitle(response.output_text ?? "");
@@ -184,7 +170,6 @@ export function buildOpenAIInput(
   ];
 }
 
-/** Keep the exam/solution routing hint within OpenAI's 64-character cap. */
 function toPromptCacheKey(cacheKey: string): string {
   return createHash("sha256").update(cacheKey).digest("hex").slice(0, 32);
 }
@@ -268,7 +253,11 @@ async function* streamOpenAIResponse(
 
       case "response.file_search_call.completed":
         searching = false;
-        yield { type: "status", step: "search_done", message: "Läser material" };
+        yield {
+          type: "status",
+          step: "search_done",
+          message: "Läser material",
+        };
         break;
 
       case "response.output_text.annotation.added": {

@@ -1,5 +1,4 @@
 import { createClient } from "@supabase/supabase-js";
-import { MiddlewareHandler } from "hono";
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
@@ -13,8 +12,3 @@ if (!supabaseKey) {
 }
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
-
-export const supabaseMiddleware: MiddlewareHandler = async (c, next) => {
-  c.set("supabase", supabase);
-  await next();
-};

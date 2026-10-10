@@ -2,14 +2,7 @@ import OpenAI, { toFile } from "openai";
 import { HTTPException } from "hono/http-exception";
 import { supabase } from "~/db/supabase";
 
-/**
- * Lecture material for study courses: PDFs kept in the `study-materials`
- * bucket and indexed in one OpenAI vector store per course, which chats in the
- * course search with `file_search`.
- */
-
 export const MATERIAL_BUCKET = "study-materials";
-/** Total size of all PDFs in one course. */
 export const COURSE_QUOTA_BYTES = 100 * 1024 * 1024;
 
 const openai = new OpenAI({
@@ -38,7 +31,6 @@ export interface CourseFileRow {
 const FILE_COLUMNS =
   "id, course_id, name, size_bytes, storage_path, openai_file_id, status, error, created_at";
 
-/** The course, if it exists and belongs to `userId`; otherwise 404/403. */
 export async function getOwnedCourse(
   courseId: string,
   userId: string,
@@ -68,7 +60,6 @@ export async function listCourseFiles(
   return data ?? [];
 }
 
-/** The course's vector store, created on first use. */
 async function ensureVectorStore(course: StudyCourse): Promise<string> {
   if (course.vector_store_id) return course.vector_store_id;
   const store = await openai.vectorStores.create({
@@ -88,16 +79,11 @@ async function ensureVectorStore(course: StudyCourse): Promise<string> {
   return store.id;
 }
 
-/**
- * Indexes a PDF the browser already put in Storage. The row starts as
- * `processing`; `refreshProcessingFiles` moves it on once OpenAI is done.
- */
 export async function addCourseFile(
   course: StudyCourse,
   storagePath: string,
   name: string,
 ): Promise<CourseFileRow> {
-  // Paths are <user_id>/<course_id>/<file>.pdf; anything else is not ours to read.
   const [owner, courseFolder] = storagePath.split("/");
   if (owner !== course.user_id || courseFolder !== course.id) {
     throw new HTTPException(403, { message: "Ogiltig filsökväg" });
@@ -136,7 +122,6 @@ export async function addCourseFile(
   let openaiFileId: string | null = null;
   try {
     const vectorStoreId = await ensureVectorStore(course);
-    // The display name doubles as the filename citations carry.
     const file = await openai.files.create({
       file: await toFile(bytes, name, { type: "application/pdf" }),
       purpose: "assistants",
@@ -168,7 +153,6 @@ export async function addCourseFile(
   return data;
 }
 
-/** Asks OpenAI about files still indexing and records the outcome. */
 export async function refreshProcessingFiles(
   course: StudyCourse,
   files: CourseFileRow[],
@@ -203,7 +187,6 @@ export async function refreshProcessingFiles(
   );
 }
 
-/** Removes one file everywhere it lives. Missing pieces are not an error. */
 export async function deleteCourseFile(
   course: StudyCourse,
   file: CourseFileRow,
@@ -211,7 +194,9 @@ export async function deleteCourseFile(
   if (file.openai_file_id) {
     if (course.vector_store_id) {
       await openai.vectorStores.files
-        .delete(file.openai_file_id, { vector_store_id: course.vector_store_id })
+        .delete(file.openai_file_id, {
+          vector_store_id: course.vector_store_id,
+        })
         .catch(() => {});
     }
     await openai.files.delete(file.openai_file_id).catch(() => {});
@@ -224,10 +209,6 @@ export async function deleteCourseFile(
   if (error) throw new HTTPException(500, { message: error.message });
 }
 
-/**
- * Deletes a course with everything hanging off it: material, vector store,
- * chats and their logs.
- */
 export async function deleteCourse(course: StudyCourse): Promise<void> {
   const files = await listCourseFiles(course.id);
   for (const file of files) await deleteCourseFile(course, file);
@@ -248,7 +229,6 @@ export async function deleteCourse(course: StudyCourse): Promise<void> {
     if (error) throw new HTTPException(500, { message: error.message });
   }
 
-  // Conversations go with the course (on delete cascade).
   const { error } = await supabase
     .from("study_courses")
     .delete()
@@ -256,14 +236,13 @@ export async function deleteCourse(course: StudyCourse): Promise<void> {
   if (error) throw new HTTPException(500, { message: error.message });
 }
 
-/** What a chat inside the course may search. */
 export async function courseChatContext(
   courseId: string,
   userId: string,
 ): Promise<{ name: string; vectorStoreId: string | null }> {
   const course = await getOwnedCourse(courseId, userId);
-  if (!course.vector_store_id) return { name: course.name, vectorStoreId: null };
-  // Files still indexing count too: the store only ever returns what is done.
+  if (!course.vector_store_id)
+    return { name: course.name, vectorStoreId: null };
   const { count } = await supabase
     .from("study_course_files")
     .select("id", { count: "exact", head: true })

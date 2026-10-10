@@ -7,7 +7,6 @@ import {
   studyCoursePrompt,
 } from "~/utils/prompts";
 import { courseChatContext } from "~/utils/course-material";
-import { SKILL_PROMPTS } from "~/utils/skills";
 import {
   chatMessageSchema,
   examIdSchema,
@@ -20,7 +19,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { streamOpenAIResponse, PdfData } from "~/utils/chat.utils";
 import { getModelConfig, getModelLogId, type ChatModelId } from "./chat.models";
-import { fetchPdfAsBase64 } from "~/utils/pdf.cache";
+import { fetchPdfAsBase64 } from "~/utils/pdf";
 import { rateLimitByIdentity } from "~/utils/rate.limit";
 import {
   cancelTurn,
@@ -37,13 +36,9 @@ import { z } from "zod";
 
 const chat = new Hono().basePath("/v1/chat");
 
-// ~12/min is roughly 10x the fastest real usage: the p25 gap between turns in
-// a session is 54s, so even an intense student sits near 1/min. Both chat
-// routes share the bucket, so a student gets the same budget either way.
 const chatRateLimit = () =>
   rateLimitByIdentity({ windowMs: 60_000, max: 12, name: "chat" });
 
-/** Resolves the model and refuses the thinking model to anonymous users. */
 function resolveModel(modelId: ChatModelId, userId: string | null) {
   const modelConfig = getModelConfig(modelId);
   if (modelConfig.requiresAuth && !userId) {
@@ -95,7 +90,6 @@ chat.post(
       modelId,
       selectionContext,
       webSearch: requestedWebSearch,
-      skill,
       turnId,
     } = body;
 
@@ -127,11 +121,7 @@ chat.post(
       role: "user",
       content: lastMsgText,
       model: modelLogId,
-      // Turns hur frågan ställdes till något admin kan läsa. `webSearch` är den
-      // effektiva flaggan, efter modellgatingen på raden ovan — inte det klienten
-      // bad om, eftersom det är den förra som faktiskt formade svaret.
       selection_context: selectionContext || null,
-      skill: skill || null,
       web_search: webSearch,
     });
 
@@ -167,10 +157,8 @@ chat.post(
       });
     }
 
-    // Additivt, så att webbsökning och en vald färdighet kan gälla samtidigt.
     let systemPrompt = SYSTEM_PROMPT;
     if (webSearch) systemPrompt += WEB_SEARCH_PROMPT;
-    if (skill && SKILL_PROMPTS[skill]) systemPrompt += SKILL_PROMPTS[skill];
 
     const modelLastMsgText =
       lastMsgText.trim() ||
@@ -209,11 +197,6 @@ chat.post(
   },
 );
 
-/**
- * The standalone learning chat. No exam is attached; courses referenced with
- * "@TATA41" are named in the prompt and turn on web search so the model can
- * look up what the course covers.
- */
 chat.post(
   "/learn",
   chatRateLimit(),
@@ -244,7 +227,6 @@ chat.post(
     });
     const { userId, anonymousUserId } = identity;
 
-    // Study courses are private to their owner, so they need a signed-in user.
     if (courseId && !userId) {
       throw new HTTPException(401, {
         message: "Logga in för att använda kurser",
@@ -336,10 +318,6 @@ chat.post(
   },
 );
 
-/**
- * The Stop button. Ends a running turn started by the same user (or the same
- * anonymous browser); leaving the page never does, the answer is kept.
- */
 chat.post(
   "/turns/:turnId/cancel",
   zValidator("param", z.object({ turnId: z.uuid() })),

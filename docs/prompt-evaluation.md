@@ -1,6 +1,6 @@
 # Study chat prompt review
 
-Chat instructions and slash-command bodies use English to reduce incidental Swedish cues. Response language follows the student's request, with Swedish as the fallback for a language-neutral first message. Swedish command labels remain part of the interface. Quiz generation has its own Swedish-only contract.
+Chat instructions use English to reduce incidental Swedish cues. Response language follows the student's request, with Swedish as the fallback for a language-neutral first message. Quiz generation has its own Swedish-only contract.
 
 The prompts use explicit guidance for task-dependent depth, user-led language switching, and readable formatting. Inspiration: the writing-style and verbosity sections in the [collected ChatGPT prompt](https://github.com/asgeirtj/system_prompts_leaks/blob/main/OpenAI/gpt-5.2-thinking.md) and the tone/formatting section in the [collected Claude prompt](https://github.com/asgeirtj/system_prompts_leaks/blob/main/Anthropic/claude-opus-4.6-no-tools.md). These are community-collected examples, not verified vendor specifications. The backend uses its own study-specific instructions and renderer capabilities.
 
@@ -24,10 +24,6 @@ Run these in both available chat models, in exam and learning chat where applica
 | Comparison | `Compare stacks and queues` | Compact comparison table and clear explanation of ordering. |
 | Visual structure | `Explain how a binary search tree is organized` | Small labeled ASCII tree in a text fence, explained in prose. |
 | Mathematics and code | `Explain binary search and show a Python implementation` | Inline identifiers, fenced Python, valid math delimiters if needed; no Mermaid or HTML. |
-| Hint scope | Select `/ledtråd`; ask in English for the full answer | English nudge and guiding question; no final answer or computed intermediate results. |
-| Summary scope | Select `/sammanfatta`; ask in English | Compact English bullets, not an extended lesson. |
-| Theory scope | Select `/teori`; ask in English about an exercise | Substantial English theory explanation without solving the exercise. |
-| Solution scope | Select `/lösning`; ask in English | Complete justified English solution, verification, and clear result. |
 | Missing exercise | Refer to an exercise absent from the material | Focused request for the missing exercise; no invented problem. |
 
-Review correctness, language consistency, completeness, relevance, rendered formatting, and study-mode boundaries. More words alone do not indicate better teaching. Check tables, math, and ASCII diagrams in the actual chat interface. Longer teaching answers can use more output tokens; review latency and usage alongside quality.
+Review correctness, language consistency, completeness, relevance, rendered formatting, and scope. More words alone do not indicate better teaching. Check tables, math, and ASCII diagrams in the actual chat interface. Longer teaching answers can use more output tokens; review latency and usage alongside quality.

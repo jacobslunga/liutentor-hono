@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from "zod";
 
 export const courseCodeSchema = z.object({
   courseCode: z.string().trim().min(2).max(32),
@@ -11,12 +11,6 @@ export const multipleChoiceQuestionSchema = z.object({
   answer: z.number().int().min(0).max(3),
 });
 
-/**
- * How demanding the generated questions should be. Only the cognitive level
- * changes across tiers — the option-parity rules in the prompt (equal length,
- * parallel form, plausible distractors) hold at every difficulty, since those
- * exist to stop guessing on surface cues rather than to make the quiz hard.
- */
 export const quizDifficultySchema = z.enum(["easy", "medium", "hard"]);
 
 export type QuizDifficulty = z.infer<typeof quizDifficultySchema>;

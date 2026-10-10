@@ -17,12 +17,6 @@ import {
   type ValidatedChatAttachment,
 } from "./chat.attachments";
 
-/**
- * The parts every chat route shares: reading the multipart request, working
- * out who is asking and whether the turn earns a title, and streaming the
- * reply back as SSE while logging both sides of the turn.
- */
-
 export function extractTextContent(content: unknown): string {
   if (Array.isArray(content)) {
     const textPart = content.find(
@@ -42,7 +36,6 @@ export function logToDBAsync(payload: any) {
     });
 }
 
-/** Parses `payload` (JSON) against `schema` and validates the `files` fields. */
 export async function readChatForm<S extends z.ZodType>(
   c: Context,
   schema: S,
@@ -108,9 +101,6 @@ export async function resolveChatIdentity(
   const { conversationId, isFirstMessage, messageCount } = opts;
   const anonymousUserId = c.req.header("x-anonymous-user-id") || "unknown";
   const userId = await getAuthenticatedUserId(c.req.header("Authorization"));
-  // Anonymous chats have no row to check, so the title rides on the stream
-  // only. The history-length guard keeps a client from paying for a title
-  // call on every turn by always claiming it is the first message.
   let shouldGenerateTitle = !!isFirstMessage && messageCount === 1;
 
   if (conversationId) {
@@ -137,15 +127,8 @@ export async function resolveChatIdentity(
   return { userId, anonymousUserId, shouldGenerateTitle };
 }
 
-/** Noted on an answer the student stopped, matching what the app shows. */
 const CANCELLED_NOTE = "> *Avbruten av användaren*";
 
-/**
- * Turns being generated on this instance, by the id the app sends, so the
- * Stop button can end one. Leaving the page does not: the answer is finished
- * and saved either way. (With several instances a cancel can miss; the turn
- * then simply completes.)
- */
 const activeTurns = new Map<
   string,
   { controller: AbortController; owner: string }
@@ -153,11 +136,9 @@ const activeTurns = new Map<
 
 export interface ChatTurn {
   signal: AbortSignal;
-  /** Forgets the turn; call once it is done. */
   end: () => void;
 }
 
-/** Registers a turn under `turnId` (when the app sent one). */
 export function startTurn(turnId: string | undefined, owner: string): ChatTurn {
   const controller = new AbortController();
   if (turnId) activeTurns.set(turnId, { controller, owner });
@@ -170,7 +151,6 @@ export function startTurn(turnId: string | undefined, owner: string): ChatTurn {
   };
 }
 
-/** Stops a running turn if `owner` started it. True when one was stopped. */
 export function cancelTurn(turnId: string, owner: string): boolean {
   const turn = activeTurns.get(turnId);
   if (!turn || turn.owner !== owner) return false;
@@ -179,7 +159,6 @@ export function cancelTurn(turnId: string, owner: string): boolean {
   return true;
 }
 
-/** Who a turn belongs to: the user, or the anonymous browser id. */
 export const turnOwner = ({
   userId,
   anonymousUserId,
@@ -188,14 +167,11 @@ export const turnOwner = ({
 
 export interface StreamChatOptions {
   responseStream: AsyncGenerator<ChatStreamEvent>;
-  /** Aborted only by an explicit cancel, never by the client going away. */
   turn: ChatTurn;
   identity: ChatIdentity;
   conversationId?: string | null;
-  /** Course label handed to the title model; may be empty. */
   titleCourseCode: string;
   lastMsgText: string;
-  /** Columns written on the assistant's log row besides role/content. */
   logFields: Record<string, unknown>;
 }
 
@@ -210,10 +186,6 @@ export function streamChatResponse(c: Context, opts: StreamChatOptions) {
     turn,
   } = opts;
 
-  // Status and source events need a frame to travel in, but a browser holding a
-  // cached bundle still speaks the old concatenate-the-bytes protocol. Serving
-  // both off the same generator lets the two repos deploy independently; the
-  // plaintext branch can be deleted once no client asks for it.
   const wantsEvents = (c.req.header("accept") ?? "").includes(
     "text/event-stream",
   );
@@ -222,8 +194,6 @@ export function streamChatResponse(c: Context, opts: StreamChatOptions) {
     c.header("Content-Type", "text/event-stream; charset=utf-8");
     c.header("Cache-Control", "no-cache");
     c.header("Connection", "keep-alive");
-    // Cloud Run buffers a response it thinks it can compress, which would hold
-    // every status event until the turn finished — exactly backwards.
     c.header("X-Accel-Buffering", "no");
   } else {
     c.header("Content-Type", "text/plain; charset=utf-8");
@@ -233,9 +203,6 @@ export function streamChatResponse(c: Context, opts: StreamChatOptions) {
   return stream(c, async (s) => {
     let fullResponse = "";
     let sources: unknown[] = [];
-    // The answer is generated and saved whether or not anyone is still
-    // listening: a student who leaves the chat finds it there when they come
-    // back. A gone client only means we stop writing to it.
     let clientGone = false;
     s.onAbort(() => {
       clientGone = true;
@@ -248,7 +215,6 @@ export function streamChatResponse(c: Context, opts: StreamChatOptions) {
       await write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
     };
 
-    /** Stopped by the student: keep what was written, marked as stopped. */
     const saveStopped = () => {
       fullResponse = stripCitationMarkers(fullResponse);
       turn.end();
@@ -263,7 +229,6 @@ export function streamChatResponse(c: Context, opts: StreamChatOptions) {
     };
 
     const emit = async (event: ChatStreamEvent) => {
-      // Kept for the log row, so the chips come back with the history.
       if (event.type === "sources") sources = event.items;
       if (event.type === "text") {
         fullResponse += event.delta;
@@ -272,7 +237,6 @@ export function streamChatResponse(c: Context, opts: StreamChatOptions) {
           return;
         }
       } else if (!wantsEvents) {
-        // The plaintext protocol has nowhere to put anything but text.
         return;
       }
       await sendEvent(event.type, event);
@@ -282,17 +246,12 @@ export function streamChatResponse(c: Context, opts: StreamChatOptions) {
       for await (const event of responseStream) {
         await emit(event);
       }
-      // The SDK ends an aborted stream quietly instead of throwing.
       if (turn.signal.aborted) {
         saveStopped();
         return;
       }
       fullResponse = stripCitationMarkers(fullResponse);
 
-      // The plaintext protocol has nowhere to put a title, and only a stored
-      // conversation needs one without the stream.
-      // A title for an anonymous chat only travels on the stream, so it is
-      // pointless once that client has gone.
       if (
         shouldGenerateTitle &&
         fullResponse.trim() &&
@@ -323,7 +282,6 @@ export function streamChatResponse(c: Context, opts: StreamChatOptions) {
             if (saved && wantsEvents) await sendEvent("title", { title });
           }
         } catch (error) {
-          // A title is decorative; never fail an otherwise successful answer.
           console.error("Conversation title generation error:", error);
         }
       }
@@ -335,8 +293,6 @@ export function streamChatResponse(c: Context, opts: StreamChatOptions) {
         return;
       }
       console.error("Streaming error:", error);
-      // Once bytes are on the wire an HTTP status can no longer say anything,
-      // so a framed client gets a real error frame instead of a truncated turn.
       if (wantsEvents) {
         await sendEvent("error", {
           message: "Något gick fel. Försök igen senare.",

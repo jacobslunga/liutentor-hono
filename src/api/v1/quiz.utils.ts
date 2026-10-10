@@ -10,10 +10,6 @@ function shuffleArray<T>(items: T[]): T[] {
 }
 
 function buildTargetAnswerPositions(questionCount: number): number[] {
-  // Keep the four slots as even as possible, but hand the leftover slots to
-  // random positions. `index % 4` kept them even too, yet always gave the
-  // remainder to positions 0 and 1, so index 0 was measurably the safest guess
-  // across quizzes.
   const perPosition = Math.floor(questionCount / 4);
   const remainder = questionCount % 4;
   const bonusPositions = shuffleArray([0, 1, 2, 3]).slice(0, remainder);
@@ -66,13 +62,6 @@ export function rebalanceQuizAnswerDistribution(
   };
 }
 
-/**
- * The strongest tell in a generated quiz is length: if the correct option is
- * consistently the longest one, a student can score well without knowing the
- * material. Random options would put the correct answer at the top of the
- * length ranking about a quarter of the time, so anything much above that means
- * the prompt's option rules are not landing for this course.
- */
 export function measureCorrectAnswerLengthBias(quiz: MultipleChoiceQuiz): {
   questionCount: number;
   longestCount: number;
@@ -99,9 +88,6 @@ export function measureCorrectAnswerLengthBias(quiz: MultipleChoiceQuiz): {
     const otherMean =
       others.reduce((sum, length) => sum + length, 0) / others.length;
 
-    // Strictly longest, not "longest or tied". Once the options are actually
-    // balanced, near-ties are common and counting them made a healthy quiz read
-    // as biased — a tie is precisely the case where length tells you nothing.
     if (others.every((length) => correctLength > length)) longestCount += 1;
     ratioSum += otherMean > 0 ? correctLength / otherMean : 1;
   }

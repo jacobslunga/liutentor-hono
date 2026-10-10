@@ -16,10 +16,6 @@ import {
 import { rateLimitByIdentity } from "~/utils/rate.limit";
 import { success } from "~/utils/response";
 
-/**
- * Study courses: the material side. Creating and renaming a course happens in
- * the app through RLS; everything that touches OpenAI or the quota is here.
- */
 const courses = new Hono().basePath("/v1/study-courses");
 
 const courseParam = z.object({ courseId: z.uuid() });
@@ -32,12 +28,13 @@ const addFileBody = z.object({
 async function requireUser(c: Context): Promise<string> {
   const userId = await getAuthenticatedUserId(c.req.header("Authorization"));
   if (!userId) {
-    throw new HTTPException(401, { message: "Logga in för att använda kurser" });
+    throw new HTTPException(401, {
+      message: "Logga in för att använda kurser",
+    });
   }
   return userId;
 }
 
-/** What the app sees of a file: no storage or OpenAI internals. */
 function toClientFile(file: CourseFileRow) {
   return {
     id: file.id,
@@ -49,19 +46,15 @@ function toClientFile(file: CourseFileRow) {
   };
 }
 
-courses.get(
-  "/:courseId/files",
-  zValidator("param", courseParam),
-  async (c) => {
-    const userId = await requireUser(c);
-    const course = await getOwnedCourse(c.req.valid("param").courseId, userId);
-    const files = await refreshProcessingFiles(
-      course,
-      await listCourseFiles(course.id),
-    );
-    return c.json(success(files.map(toClientFile)));
-  },
-);
+courses.get("/:courseId/files", zValidator("param", courseParam), async (c) => {
+  const userId = await requireUser(c);
+  const course = await getOwnedCourse(c.req.valid("param").courseId, userId);
+  const files = await refreshProcessingFiles(
+    course,
+    await listCourseFiles(course.id),
+  );
+  return c.json(success(files.map(toClientFile)));
+});
 
 courses.post(
   "/:courseId/files",
@@ -85,7 +78,9 @@ courses.delete(
     const userId = await requireUser(c);
     const { courseId, fileId } = c.req.valid("param");
     const course = await getOwnedCourse(courseId, userId);
-    const file = (await listCourseFiles(course.id)).find((f) => f.id === fileId);
+    const file = (await listCourseFiles(course.id)).find(
+      (f) => f.id === fileId,
+    );
     if (!file) throw new HTTPException(404, { message: "Filen finns inte" });
     await deleteCourseFile(course, file);
     return c.json(success(null));
