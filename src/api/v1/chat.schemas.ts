@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CHAT_MODEL_IDS } from "./chat.models";
 import { SKILL_IDS } from "~/utils/skills";
 
 const messagesSchema = z
@@ -35,7 +36,7 @@ export const chatMessageSchema = z.object({
   solutionUrl: z.url().optional(),
   courseCode: z.string(),
   isFirstMessage: z.boolean().optional(),
-  modelId: z.string().optional(),
+  modelId: z.enum(CHAT_MODEL_IDS),
   conversationId: z.uuid().optional().nullable(),
   selectionContext: z.string().max(2000).optional(),
   webSearch: z.boolean().optional(),
@@ -62,7 +63,7 @@ export const learnMessageSchema = z.object({
   /** A study course the chat belongs to; its material is searched. */
   courseId: z.uuid().optional().nullable(),
   isFirstMessage: z.boolean().optional(),
-  modelId: z.string().optional(),
+  modelId: z.enum(CHAT_MODEL_IDS),
   conversationId: z.uuid().optional().nullable(),
   selectionContext: z.string().max(2000).optional(),
   webSearch: z.boolean().optional(),

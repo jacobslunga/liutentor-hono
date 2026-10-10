@@ -1,12 +1,16 @@
 import { describe, expect, it, mock } from "bun:test";
 import {
-  CHAT_TIER_IDS,
-  DEFAULT_MODEL_ID,
+  CHAT_MODEL_IDS,
+  MODEL_MAP,
   LUNA_CHAT_MODEL_ID,
-  SOL_CHAT_MODEL_ID,
+  TERRA_CHAT_MODEL_ID,
   getModelConfig,
   getModelLogId,
 } from "../src/api/v1/chat.models";
+import {
+  chatMessageSchema,
+  learnMessageSchema,
+} from "../src/api/v1/chat.schemas";
 import {
   buildOpenAIInput,
   generateConversationTitle,
@@ -15,52 +19,39 @@ import {
 } from "../src/utils/chat.utils";
 
 describe("chat model routing", () => {
-  it("uses Luna/low, Luna/high, and Sol/low for the three tiers", () => {
-    expect(getModelConfig(CHAT_TIER_IDS.low)).toMatchObject({
-      provider: "openai",
-      modelId: LUNA_CHAT_MODEL_ID,
-      effort: "low",
-    });
-    expect(getModelConfig(CHAT_TIER_IDS.balanced)).toMatchObject({
-      provider: "openai",
-      modelId: LUNA_CHAT_MODEL_ID,
-      effort: "high",
-    });
-    expect(getModelConfig(CHAT_TIER_IDS.deep)).toMatchObject({
-      provider: "openai",
-      modelId: SOL_CHAT_MODEL_ID,
-      effort: "low",
-      requiresAuth: true,
-    });
+  it("routes exact model names to fast Luna and thinking Terra", () => {
+    expect(getModelConfig(LUNA_CHAT_MODEL_ID)).toEqual(MODEL_MAP.fast);
+    expect(getModelConfig(TERRA_CHAT_MODEL_ID)).toEqual(MODEL_MAP.thinking);
+    expect(MODEL_MAP.thinking.requiresAuth).toBe(true);
   });
 
-  it("falls back to the base tier for omitted, empty, or unknown IDs", () => {
-    expect(DEFAULT_MODEL_ID).toBe(CHAT_TIER_IDS.low);
-    for (const id of [undefined, "", "unknown-model"]) {
-      expect(getModelConfig(id)).toMatchObject({
-        provider: "openai",
-        modelId: LUNA_CHAT_MODEL_ID,
-        effort: "low",
-      });
+  it("rejects missing, unknown, alias, and incorrectly cased IDs in both routes", () => {
+    for (const schema of [chatMessageSchema, learnMessageSchema]) {
+      const body = {
+        messages: [{ role: "user", content: "Hej" }],
+        examUrl: "https://example.com/exam.pdf",
+        courseCode: "TATA41",
+      };
+      for (const modelId of CHAT_MODEL_IDS) {
+        expect(schema.safeParse({ ...body, modelId }).success).toBe(true);
+      }
+      for (const modelId of [
+        undefined,
+        "",
+        "unknown-model",
+        "fast",
+        "thinking",
+        "gpt-6-sol",
+        "GPT-6-LUNA",
+        "gpt-6-luna-low",
+      ]) {
+        expect(schema.safeParse({ ...body, modelId }).success).toBe(false);
+      }
     }
   });
 
-  it("keeps old clients compatible while preserving deep-tier auth", () => {
-    expect(getModelConfig("gemini-flash-lite-minimal").effort).toBe("low");
-    expect(getModelConfig("gemini-flash-lite-medium").effort).toBe("high");
-    expect(getModelConfig("gemini-flash-lite-high")).toMatchObject({
-      modelId: SOL_CHAT_MODEL_ID,
-      effort: "low",
-      requiresAuth: true,
-    });
-    expect(getModelConfig("gpt-6-luna").effort).toBe("low");
-    expect(getModelConfig("gpt-6-sol").requiresAuth).toBe(true);
-    expect(getModelConfig("gpt-5.6-luna").effort).toBe("high");
-    expect(getModelConfig("gpt-5.6-terra").requiresAuth).toBe(true);
-  });
-
-  it("marks every tier as searchable and includes effort in logs", () => {
-    for (const id of Object.values(CHAT_TIER_IDS)) {
+  it("marks both models as searchable and includes effort in logs", () => {
+    for (const id of CHAT_MODEL_IDS) {
       const config = getModelConfig(id);
       expect(config.supportsWebSearch).toBe(true);
       expect(getModelLogId(config)).toBe(`${config.modelId}:${config.effort}`);

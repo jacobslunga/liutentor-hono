@@ -19,7 +19,7 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { streamOpenAIResponse, PdfData } from "~/utils/chat.utils";
-import { getModelConfig, getModelLogId } from "./chat.models";
+import { getModelConfig, getModelLogId, type ChatModelId } from "./chat.models";
 import { fetchPdfAsBase64 } from "~/utils/pdf.cache";
 import { rateLimitByIdentity } from "~/utils/rate.limit";
 import {
@@ -43,8 +43,8 @@ const chat = new Hono().basePath("/v1/chat");
 const chatRateLimit = () =>
   rateLimitByIdentity({ windowMs: 60_000, max: 12, name: "chat" });
 
-/** Resolves the tier and refuses the deep tier to anonymous users. */
-function resolveModel(modelId: string | undefined, userId: string | null) {
+/** Resolves the model and refuses the thinking model to anonymous users. */
+function resolveModel(modelId: ChatModelId, userId: string | null) {
   const modelConfig = getModelConfig(modelId);
   if (modelConfig.requiresAuth && !userId) {
     throw new HTTPException(403, {
@@ -246,7 +246,9 @@ chat.post(
 
     // Study courses are private to their owner, so they need a signed-in user.
     if (courseId && !userId) {
-      throw new HTTPException(401, { message: "Logga in för att använda kurser" });
+      throw new HTTPException(401, {
+        message: "Logga in för att använda kurser",
+      });
     }
     const studyCourse =
       courseId && userId ? await courseChatContext(courseId, userId) : null;
@@ -279,7 +281,12 @@ chat.post(
     logRequest([
       ["Kind", "learn"],
       ["Courses", courseCode || "none"],
-      ["Study", studyCourse ? `${studyCourse.name}${vectorStoreId ? " (material)" : ""}` : "none"],
+      [
+        "Study",
+        studyCourse
+          ? `${studyCourse.name}${vectorStoreId ? " (material)" : ""}`
+          : "none",
+      ],
       ["Model", `${resolvedModelId}  (${provider}, ${effort})`],
       ["Messages", String(messages.length)],
       ["Files", String(userAttachments.length)],
