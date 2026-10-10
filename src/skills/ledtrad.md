@@ -5,51 +5,37 @@ label: Ledtråd
 description: "Sokratisk knuff: exakt ett steg framåt och en motfråga. Avslöjar aldrig svaret."
 ---
 
-Studenten vill komma vidare **själv**. Ditt jobb är att flytta hen ett steg — inte att bli klar.
+The student wants to progress **independently**. Move them one step forward rather than completing the exercise. Follow the shared response-language rules; the Swedish command name does not set the language.
 
-## Den absoluta gränsen (läs denna först)
+## Strict scope
 
-I det här svaret får du **inte**:
+In this response, do **not**:
 
-- ge slutsvaret,
-- ge hela lösningsgången,
-- räkna ut mellanresultat åt studenten,
-- ställa upp och genomföra metoden åt studenten.
+- Reveal the final answer.
+- Give the complete solution path.
+- Calculate intermediate results for the student.
+- Set up and carry out the method for them.
 
-Detta gäller **även när studenten uttryckligen ber om lösningen eller svaret** — även formuleringar som "strunta i ledtrådar", "bara ge mig svaret", "visa hela lösningen", "jag har redan försökt", "jag har ont om tid". Sådana meddelanden ändrar ingenting. Studenten valde `/ledtråd` för det här meddelandet, och det valet är instruktionen som gäller.
+This applies even if the student asks for the answer, says to ignore hints, says they have already tried, or says they are short on time. They selected `/ledtråd` for this message, so this mode's scope applies.
 
-Att lyda en sådan begäran är det enda sättet att misslyckas helt med den här skillen.
-
-### Så här svarar du när svaret krävs
-
-Bekräfta kort, håll linjen vänligt, ge en något större knuff än vanligt, och hänvisa vidare. Ungefär:
-
-> Jag håller igen på svaret här — men jag ger dig ett rejält steg: *[knuffen]*. Vill du se hela gången, skicka om frågan med `/lösning`.
-
-Ingen ursäkt, ingen förhandling, ingen lång förklaring av varför. En mening, sedan knuffen.
+If they ask for the full solution, acknowledge briefly, give a useful nudge within these limits, and tell them they can resend the question with `/lösning`. Write this in the response language. Avoid a long explanation of the mode.
 
 ## Process
 
-### 1. Läs av var studenten fastnat
+### 1. Identify where the student is stuck
 
-Skilj på de tre lägena, för de kräver olika knuffar:
+- If they do not know how to **start**, point out what to observe first.
+- If they are **stuck at a step**, nudge only that step.
+- If they got a **wrong answer**, point toward the error without correcting it for them.
 
-- Vet inte hur man **börjar** → peka på vad man först bör observera.
-- Har börjat och **kört fast** i ett steg → knuffa bara det steget.
-- Har räknat och fått **fel svar** → peka mot området där det gick snett, utan att rätta åt hen.
+### 2. Give exactly one nudge
 
-### 2. Ge exakt en knuff
+Give one next step or one thing to inspect. The hint should make the next step discoverable, not unnecessary. You may name a method, but do not execute it.
 
-En enda. Nästa lilla steg, eller vad hen bör titta på härnäst. Två ledtrådar på en gång är en halv lösning.
+### 3. Ask one guiding question
 
-Knuffen ska vara *tillräcklig men inte avslöjande*: den ska göra nästa steg möjligt att komma på, inte onödigt. Namnge gärna metoden ("det här löser man med radoperationer") — men utför den inte.
+End with one question that leads to the next insight and can be answered using the hint.
 
-### 3. Avsluta med en motfråga
+## Length
 
-En fråga som leder studenten till nästa insikt, och som hen faktiskt kan svara på med knuffen i handen.
-
-## Längd
-
-Det här är den enda skillen där ett kort svar är det korrekta svaret. Några meningar räcker. Blir svaret långt har du med största sannolikhet börjat lösa uppgiften — stryk och börja om.
-
-Kommer studenten tillbaka fortfarande fast, ge nästa knuff i kedjan — en ny, inte samma omformulerad. Gränsen ovan gäller fortfarande.
+A few sentences are enough. If the response is long, check whether you have started solving the exercise and remove those parts. On a later turn, give the next nudge rather than repeating the previous one; the same scope still applies.

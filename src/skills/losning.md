@@ -5,37 +5,35 @@ label: Fullständig lösning
 description: "Komplett lösningsgång med alla mellansteg, motiveringar och ett tydligt markerat slutsvar."
 ---
 
-Studenten vill se **hela lösningen**, i den form som skulle ge full poäng på tentan. Måttstocken är just den: skulle en rättande assistent dra poäng för ett hopp eller en omotiverad slutsats, hör steget hemma i svaret.
-
-Instruktionen om koncishet i **Svarsstil** gäller inte fullständigheten här. Håll språket stramt, men utelämna inga steg.
+The student wants the **complete solution**, at the standard needed for full exam credit. Include any step whose omission would leave an unjustified conclusion. Follow the shared response-language rules for prose, headings, and the final answer label.
 
 ## Process
 
-### 1. Fastställ vad som är givet och vad som söks
+### 1. Establish the givens and goal
 
-Kort, med egna ord. Fel svar börjar oftare i en missläst uppgift än i en missad uträkning.
+Restate briefly in your own words. Read the exercise carefully before calculating.
 
-### 2. Välj metod, och säg varför
+### 2. Choose and justify the method
 
-Namnge angreppssättet i en mening innan du börjar räkna, och varför det passar här. Finns en märkbart enklare väg, ta den och nämn alternativet i en bisats — men byt aldrig metod mitt i lösningen.
+Name the approach and explain why it fits before beginning. Prefer a clearly simpler method when available and keep the solution coherent.
 
-### 3. Genomför, med varje steg motiverat
+### 3. Carry out the solution with justification
 
-- Ta med alla mellansteg. Ingen algebra, ingen förenkling och inget teckenbyte hoppas över.
-- Motivera varje steg kort med den regel, formel eller sats som används.
-- Kontrollera förutsättningarna för en sats innan du åberopar den, inte efteråt.
-- Definiera varje beteckning du inför.
+- Show intermediate steps, including algebra, simplifications, and sign changes.
+- Briefly justify steps with the rule, formula, or theorem used.
+- Check the assumptions of a theorem before applying it.
+- Define each new symbol.
 
-### 4. Rimlighetskontrollera
+Keep the wording focused, but do not omit steps needed to follow or justify the result.
 
-Innan slutsvaret: verifiera. Sätt in lösningen i ursprungsekvationen, kontrollera enheter, gränsfall, tecken eller storleksordning — vad som nu är möjligt. Visa kontrollen; den är en del av lösningen, inte en efterkonstruktion.
+### 4. Verify the result
 
-### 5. Markera slutsvaret
+Show a relevant check: substitution into the original equation, units, limiting cases, signs, or order of magnitude. The check is part of the solution.
 
-Avsluta med svaret tydligt avskilt, med enhet där det är relevant. Har uppgiften flera delfrågor, svara på var och en explicit.
+### 5. State the final answer clearly
 
-Ange villkor som svaret vilar på, och beskriv fullständiga lösningsmängder som mängder — inte som ett enda representantvärde.
+Include units where relevant and explicitly answer every requested subpart. State conditions and give complete solution sets rather than a single representative value.
 
-## Struktur
+## Structure
 
-Numrerade steg med korta rubriker, sedan ett avslutande **Svar**. Är uppgiften kort räcker löpande motiverad text — tvinga inte in en trestegsuträkning i en mall.
+Use numbered steps with short headings for substantial solutions, then a clearly marked final answer. For a short exercise, connected explanatory prose is enough; do not impose a template on a three-step calculation.

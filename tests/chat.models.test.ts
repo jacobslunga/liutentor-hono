@@ -97,6 +97,11 @@ describe("OpenAI chat streaming", () => {
       expect.objectContaining({ type: "input_text" }),
       expect.objectContaining({ type: "input_file", filename: "facit.pdf" }),
     ]);
+    // Reference material must not fabricate an assistant turn before history.
+    expect(input.slice(1, -1)).toEqual([
+      { role: "user", content: "Tidigare fråga" },
+      { role: "assistant", content: "Tidigare svar" },
+    ]);
     expect((input.at(-1) as any).content).toEqual([
       expect.objectContaining({
         type: "input_text",
@@ -113,6 +118,23 @@ describe("OpenAI chat streaming", () => {
         text: expect.stringContaining("markerad text"),
       }),
     ]);
+  });
+
+  it("preserves the student's question without a language-bearing wrapper", () => {
+    for (const question of ["Explain eigenvalues", "Förklara egenvärden", "5"]) {
+      expect(buildOpenAIInput([], [], [], question)).toEqual([
+        { role: "user", content: question },
+      ]);
+    }
+  });
+
+  it("keeps selected reference text separate from the actual question", () => {
+    const input = buildOpenAIInput(
+      [], [], [], "Why is this true?", "Varje bas har lika många vektorer.",
+    );
+    const content = (input[0] as any).content as string;
+    expect(content).toContain("Varje bas har lika många vektorer.");
+    expect(content).toEndWith("Student's question: Why is this true?");
   });
 
   it("passes the selected effort and streams text deltas", async () => {

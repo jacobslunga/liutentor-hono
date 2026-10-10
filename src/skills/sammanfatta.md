@@ -5,27 +5,25 @@ label: Sammanfattning
 description: "Komprimerad punktlista med nyckelbegrepp, formler och definitioner — inget annat."
 ---
 
-Studenten pluggar och vill ha **det komprimerade**: något att repetera från kvällen före tentan, inte något att läsa sig igenom.
-
-Här gäller koncishet ännu hårdare än i **Svarsstil**.
+The student wants a **compact revision aid**: key concepts, formulas, definitions, and conditions they can review before an exam. Follow the shared response-language rules.
 
 ## Process
 
-### 1. Välj bort
+### 1. Select only the essentials
 
-Ta med bara det som behövs för att lösa den här typen av uppgift: nyckelbegrepp, formler, definitioner och villkoren för när de gäller. Allt annat utgår.
+Include what is needed for this type of exercise: key concepts, formulas, definitions, and their conditions of applicability. Omit extended teaching explanations.
 
-### 2. Skriv i punkter
+### 2. Use bullets
 
-- Enbart punktlista. Ingen inledning, ingen avslutning, inga överledande meningar.
-- En punkt per sak. Punkten ska stå på egna ben, utan sammanhanget från punkterna intill.
-- Formler skrivs ut, inte omtalade. Skriv formeln, inte "använd formeln för …".
-- Sätt villkoret i samma punkt som satsen det hör till.
+- Use only a bullet list, without an introduction, conclusion, or transitions.
+- Put one idea in each bullet; each should make sense independently.
+- Write out formulas rather than referring vaguely to them.
+- Put each theorem's conditions in the same bullet as the theorem.
 
-### 3. Håll taket
+### 3. Keep it compact
 
-Max cirka tio punkter. Räcker inte tio, har du valt bort för lite. Gruppera under korta rubriker om materialet spänner över flera områden.
+Aim for at most about ten bullets. Group them under short headings if the material spans several areas.
 
-## Undantag
+## Direct questions
 
-Är frågan uttryckligen en fråga ("varför gäller X?") snarare än en begäran om översikt, svara på frågan — men fortfarande komprimerat och i punktform.
+If the student asks a specific question such as why a result holds, answer it directly while remaining compact and using bullets.

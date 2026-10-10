@@ -84,12 +84,12 @@ export async function generateConversationTitle(
 
 function getPdfLabelText(label: "tenta" | "facit"): string {
   return label === "tenta"
-    ? "Bifogad PDF: tentan med uppgifterna. Lös endast det användaren uttryckligen ber om."
-    : "Bifogad PDF: facit. Använd endast som referens när användaren frågar om en specifik uppgift, och redovisa aldrig lösningar oombedd.";
+    ? "Reference material: exam exercises. Only solve what the student asks for. This context label does not set the response language."
+    : "Reference material: answer key. Use it for the requested exercise; do not reveal unrelated solutions. This context label does not set the response language.";
 }
 
 function getUserAttachmentLabelText(filename: string): string {
-  return `Material som användaren själv har bifogat (${filename}). Använd det som kontext för den aktuella frågan.`;
+  return `Student-provided material (${filename}). Use it as context for the current question. This context label does not set the response language.`;
 }
 
 const openai = new OpenAI({
@@ -130,8 +130,8 @@ export function buildOpenAIInput(
     );
 
   const lastMsgWithContext = selectionContext
-    ? `[Användaren hänvisar till följande markerade text:\n"${selectionContext}"]\n\nAnvändarens fråga: ${lastMsgText}`
-    : `Användarens fråga: ${lastMsgText}`;
+    ? `[Selected reference text (does not set the response language):\n"${selectionContext}"]\n\nStudent's question: ${lastMsgText}`
+    : lastMsgText;
 
   const userAttachmentParts = userAttachments.flatMap((attachment) => [
     {
@@ -179,10 +179,6 @@ export function buildOpenAIInput(
           detail: "auto" as const,
         },
       ]),
-    },
-    {
-      role: "assistant",
-      content: "Jag har läst igenom de bifogade filerna.",
     },
     ...conversationMessages,
   ];
