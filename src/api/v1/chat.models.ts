@@ -10,10 +10,10 @@ export interface ModelConfig {
 }
 
 export const LUNA_CHAT_MODEL_ID = "gpt-6-luna";
-export const TERRA_CHAT_MODEL_ID = "gpt-6-terra";
+export const SOL_CHAT_MODEL_ID = "gpt-6.1-sol";
 export const CHAT_MODEL_IDS = [
   LUNA_CHAT_MODEL_ID,
-  TERRA_CHAT_MODEL_ID,
+  SOL_CHAT_MODEL_ID,
 ] as const;
 export type ChatModelId = (typeof CHAT_MODEL_IDS)[number];
 
@@ -26,7 +26,7 @@ export const MODEL_MAP = {
   },
   thinking: {
     provider: "openai",
-    modelId: TERRA_CHAT_MODEL_ID,
+    modelId: SOL_CHAT_MODEL_ID,
     effort: "low",
     requiresAuth: true,
     supportsWebSearch: true,
