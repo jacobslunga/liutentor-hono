@@ -10,11 +10,7 @@ export interface ModelConfig {
 }
 
 export const LUNA_CHAT_MODEL_ID = "gpt-6-luna";
-export const SOL_CHAT_MODEL_ID = "gpt-6.1-sol";
-export const CHAT_MODEL_IDS = [
-  LUNA_CHAT_MODEL_ID,
-  SOL_CHAT_MODEL_ID,
-] as const;
+export const CHAT_MODEL_IDS = [LUNA_CHAT_MODEL_ID] as const;
 export type ChatModelId = (typeof CHAT_MODEL_IDS)[number];
 
 export const MODEL_MAP = {
@@ -26,16 +22,19 @@ export const MODEL_MAP = {
   },
   thinking: {
     provider: "openai",
-    modelId: SOL_CHAT_MODEL_ID,
-    effort: "low",
+    modelId: LUNA_CHAT_MODEL_ID,
+    effort: "high",
     requiresAuth: true,
     supportsWebSearch: true,
   },
 } satisfies Record<"fast" | "thinking", ModelConfig>;
 
-export function getModelConfig(modelId: ChatModelId): ModelConfig {
+export function getModelConfig(
+  modelId: ChatModelId,
+  effort: ReasoningEffort = "low",
+): ModelConfig {
   const config = Object.values(MODEL_MAP).find(
-    (model) => model.modelId === modelId,
+    (model) => model.modelId === modelId && model.effort === effort,
   );
   if (!config) throw new Error("Unsupported chat model");
   return config;

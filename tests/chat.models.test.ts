@@ -3,7 +3,6 @@ import {
   CHAT_MODEL_IDS,
   MODEL_MAP,
   LUNA_CHAT_MODEL_ID,
-  TERRA_CHAT_MODEL_ID,
   getModelConfig,
   getModelLogId,
 } from "../src/api/v1/chat.models";
@@ -19,10 +18,24 @@ import {
 } from "../src/utils/chat.utils";
 
 describe("chat model routing", () => {
-  it("routes exact model names to fast Luna and thinking Terra", () => {
+  it("routes Luna to fast or thinking by effort", () => {
     expect(getModelConfig(LUNA_CHAT_MODEL_ID)).toEqual(MODEL_MAP.fast);
-    expect(getModelConfig(TERRA_CHAT_MODEL_ID)).toEqual(MODEL_MAP.thinking);
+    expect(getModelConfig(LUNA_CHAT_MODEL_ID, "high")).toEqual(MODEL_MAP.thinking);
     expect(MODEL_MAP.thinking.requiresAuth).toBe(true);
+  });
+
+  it("validates effort for both routes and defaults older requests to low", () => {
+    for (const schema of [chatMessageSchema, learnMessageSchema]) {
+      const body = {
+        messages: [{ role: "user", content: "Hej" }],
+        examUrl: "https://example.com/exam.pdf",
+        courseCode: "TATA41",
+        modelId: LUNA_CHAT_MODEL_ID,
+      };
+      expect(schema.parse(body).effort).toBe("low");
+      expect(schema.parse({ ...body, effort: "high" }).effort).toBe("high");
+      expect(schema.safeParse({ ...body, effort: "medium" }).success).toBe(false);
+    }
   });
 
   it("rejects missing, unknown, alias, and incorrectly cased IDs in both routes", () => {

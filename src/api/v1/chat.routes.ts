@@ -18,7 +18,12 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { streamOpenAIResponse, PdfData } from "~/utils/chat.utils";
-import { getModelConfig, getModelLogId, type ChatModelId } from "./chat.models";
+import {
+  getModelConfig,
+  getModelLogId,
+  type ChatModelId,
+  type ReasoningEffort,
+} from "./chat.models";
 import { fetchPdfAsBase64 } from "~/utils/pdf";
 import { rateLimitByIdentity } from "~/utils/rate.limit";
 import {
@@ -39,8 +44,12 @@ const chat = new Hono().basePath("/v1/chat");
 const chatRateLimit = () =>
   rateLimitByIdentity({ windowMs: 60_000, max: 12, name: "chat" });
 
-function resolveModel(modelId: ChatModelId, userId: string | null) {
-  const modelConfig = getModelConfig(modelId);
+function resolveModel(
+  modelId: ChatModelId,
+  effort: ReasoningEffort,
+  userId: string | null,
+) {
+  const modelConfig = getModelConfig(modelId, effort);
   if (modelConfig.requiresAuth && !userId) {
     throw new HTTPException(403, {
       message: "Den här tankenivån kräver att du är inloggad",
@@ -88,6 +97,7 @@ chat.post(
       conversationId,
       isFirstMessage,
       modelId,
+      effort: requestedEffort,
       selectionContext,
       webSearch: requestedWebSearch,
       turnId,
@@ -104,7 +114,11 @@ chat.post(
     });
     const { userId, anonymousUserId } = identity;
 
-    const { modelConfig, modelLogId } = resolveModel(modelId, userId);
+    const { modelConfig, modelLogId } = resolveModel(
+      modelId,
+      requestedEffort,
+      userId,
+    );
     const { provider, modelId: resolvedModelId, effort } = modelConfig;
     const webSearch = !!requestedWebSearch && !!modelConfig.supportsWebSearch;
 
@@ -215,6 +229,7 @@ chat.post(
       conversationId,
       isFirstMessage,
       modelId,
+      effort: requestedEffort,
       selectionContext,
       webSearch: requestedWebSearch,
       turnId,
@@ -235,7 +250,11 @@ chat.post(
     const studyCourse =
       courseId && userId ? await courseChatContext(courseId, userId) : null;
 
-    const { modelConfig, modelLogId } = resolveModel(modelId, userId);
+    const { modelConfig, modelLogId } = resolveModel(
+      modelId,
+      requestedEffort,
+      userId,
+    );
     const { provider, modelId: resolvedModelId, effort } = modelConfig;
     const webSearch =
       (!!requestedWebSearch || courses.length > 0) &&
