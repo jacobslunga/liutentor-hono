@@ -1,7 +1,8 @@
 import { describe, expect, it, mock } from "bun:test";
 import {
   CHAT_MODEL_IDS,
-  MODEL_MAP,
+  GEMINI_CHAT_MODEL_ID,
+  HAIKU_CHAT_MODEL_ID,
   LUNA_CHAT_MODEL_ID,
   getModelConfig,
   getModelLogId,
@@ -11,6 +12,10 @@ import {
   learnMessageSchema,
 } from "../src/api/v1/chat.schemas";
 import {
+  buildAnthropicMessages,
+  buildGeminiContents,
+} from "../src/utils/chat.providers";
+import {
   buildOpenAIInput,
   generateConversationTitle,
   streamOpenAIResponse,
@@ -18,10 +23,28 @@ import {
 } from "../src/utils/chat.utils";
 
 describe("chat model routing", () => {
-  it("routes Luna to fast or thinking by effort", () => {
-    expect(getModelConfig(LUNA_CHAT_MODEL_ID)).toEqual(MODEL_MAP.fast);
-    expect(getModelConfig(LUNA_CHAT_MODEL_ID, "high")).toEqual(MODEL_MAP.thinking);
-    expect(MODEL_MAP.thinking.requiresAuth).toBe(true);
+  it("routes each model to its provider and keeps the requested effort", () => {
+    expect(getModelConfig(HAIKU_CHAT_MODEL_ID, "medium")).toMatchObject({
+      provider: "anthropic",
+      modelId: "claude-haiku-5-5",
+      effort: "medium",
+    });
+    expect(getModelConfig(LUNA_CHAT_MODEL_ID)).toMatchObject({
+      provider: "openai",
+      effort: "low",
+    });
+    expect(getModelConfig(GEMINI_CHAT_MODEL_ID, "high")).toMatchObject({
+      provider: "google",
+      effort: "high",
+    });
+  });
+
+  it("only requires sign-in for high effort", () => {
+    for (const id of CHAT_MODEL_IDS) {
+      expect(getModelConfig(id, "low").requiresAuth).toBeUndefined();
+      expect(getModelConfig(id, "medium").requiresAuth).toBeUndefined();
+      expect(getModelConfig(id, "high").requiresAuth).toBe(true);
+    }
   });
 
   it("validates effort for both routes and defaults older requests to low", () => {
@@ -33,8 +56,9 @@ describe("chat model routing", () => {
         modelId: LUNA_CHAT_MODEL_ID,
       };
       expect(schema.parse(body).effort).toBe("low");
+      expect(schema.parse({ ...body, effort: "medium" }).effort).toBe("medium");
       expect(schema.parse({ ...body, effort: "high" }).effort).toBe("high");
-      expect(schema.safeParse({ ...body, effort: "medium" }).success).toBe(false);
+      expect(schema.safeParse({ ...body, effort: "max" }).success).toBe(false);
     }
   });
 
@@ -55,6 +79,8 @@ describe("chat model routing", () => {
         "fast",
         "thinking",
         "gpt-6-sol",
+        "claude-haiku-4-5",
+        "Claude-Haiku-5-5",
         "GPT-6-LUNA",
         "gpt-6-luna-low",
       ]) {
@@ -69,6 +95,62 @@ describe("chat model routing", () => {
       expect(config.supportsWebSearch).toBe(true);
       expect(getModelLogId(config)).toBe(`${config.modelId}:${config.effort}`);
     }
+  });
+});
+
+describe("provider request building", () => {
+  const pdfs: PdfData[] = [
+    { data: "exam-data", mimeType: "application/pdf", label: "tenta" },
+  ];
+  const attachments = [
+    { data: "img", filename: "figur.png", mediaType: "image/png" as const },
+  ];
+  const messages = [
+    { role: "assistant", content: "Välkommen" },
+    { role: "user", content: "Tidigare fråga" },
+    { role: "assistant", content: "Tidigare svar" },
+    { role: "user", content: "Ny fråga" },
+  ];
+
+  it("builds Anthropic messages with cached PDFs and a user-first history", () => {
+    const result = buildAnthropicMessages({
+      messages,
+      pdfs,
+      userAttachments: attachments,
+      lastMsgText: "Ny fråga",
+      selectionContext: "markerad text",
+    });
+
+    expect(result.map((m) => m.role)).toEqual([
+      "user",
+      "user",
+      "assistant",
+      "user",
+    ]);
+    expect((result[0]!.content as any[])[1]).toMatchObject({
+      type: "document",
+      cache_control: { type: "ephemeral" },
+    });
+    const last = result.at(-1)!.content as any[];
+    expect(last[1]).toMatchObject({ type: "image" });
+    expect(last.at(-1).text).toContain("markerad text");
+  });
+
+  it("builds Gemini contents with inline data and model-role history", () => {
+    const result = buildGeminiContents({
+      messages,
+      pdfs,
+      userAttachments: attachments,
+      lastMsgText: "Ny fråga",
+    });
+
+    expect(result.map((c) => c.role)).toEqual(["user", "user", "model", "user"]);
+    expect(result[0]!.parts![1]).toEqual({
+      inlineData: { mimeType: "application/pdf", data: "exam-data" },
+    });
+    expect(result.at(-1)!.parts![0]).toMatchObject({
+      text: expect.stringContaining("figur.png"),
+    });
   });
 });
 

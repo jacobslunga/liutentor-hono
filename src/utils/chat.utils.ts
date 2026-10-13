@@ -82,18 +82,17 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || "",
 });
 
-export function buildOpenAIInput(
-  messages: any[],
-  pdfs: PdfData[],
-  userAttachments: ValidatedChatAttachment[],
-  lastMsgText: string,
-  selectionContext?: string,
-): ResponseInput {
-  const history: ResponseInput = messages
+export interface TextTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/** Prior turns flattened to plain text; attachments only apply to the last turn. */
+export function toTextHistory(messages: any[]): TextTurn[] {
+  return messages
     .slice(0, -1)
-    .map((message: any) => {
-      const role: "user" | "assistant" =
-        message?.role === "assistant" ? "assistant" : "user";
+    .map((message: any): TextTurn => {
+      const role = message?.role === "assistant" ? "assistant" : "user";
       let content = "";
 
       if (Array.isArray(message?.content)) {
@@ -110,14 +109,32 @@ export function buildOpenAIInput(
 
       return { role, content };
     })
-    .filter(
-      (message) =>
-        typeof message.content === "string" && message.content.length > 0,
-    );
+    .filter((message) => message.content.length > 0);
+}
 
-  const lastMsgWithContext = selectionContext
+export function withSelectionContext(
+  lastMsgText: string,
+  selectionContext?: string,
+): string {
+  return selectionContext
     ? `[Selected reference text (does not set the response language):\n"${selectionContext}"]\n\nStudent's question: ${lastMsgText}`
     : lastMsgText;
+}
+
+export { getPdfLabelText, getUserAttachmentLabelText };
+
+export function buildOpenAIInput(
+  messages: any[],
+  pdfs: PdfData[],
+  userAttachments: ValidatedChatAttachment[],
+  lastMsgText: string,
+  selectionContext?: string,
+): ResponseInput {
+  const history: ResponseInput = toTextHistory(messages);
+  const lastMsgWithContext = withSelectionContext(
+    lastMsgText,
+    selectionContext,
+  );
 
   const userAttachmentParts = userAttachments.flatMap((attachment) => [
     {

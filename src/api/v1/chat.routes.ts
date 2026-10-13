@@ -17,8 +17,10 @@ import { timeout } from "hono/timeout";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { streamOpenAIResponse, PdfData } from "~/utils/chat.utils";
+import type { PdfData } from "~/utils/chat.utils";
+import { streamChatModel } from "~/utils/chat.providers";
 import {
+  LUNA_CHAT_MODEL_ID,
   getModelConfig,
   getModelLogId,
   type ChatModelId,
@@ -48,8 +50,13 @@ function resolveModel(
   modelId: ChatModelId,
   effort: ReasoningEffort,
   userId: string | null,
+  // Course material lives in an OpenAI vector store that only Luna can search.
+  needsFileSearch = false,
 ) {
-  const modelConfig = getModelConfig(modelId, effort);
+  const modelConfig = getModelConfig(
+    needsFileSearch ? LUNA_CHAT_MODEL_ID : modelId,
+    effort,
+  );
   if (modelConfig.requiresAuth && !userId) {
     throw new HTTPException(403, {
       message: "Den här tankenivån kräver att du är inloggad",
@@ -182,18 +189,18 @@ chat.post(
     const examTurn = startTurn(turnId, turnOwner(identity));
 
     return streamChatResponse(c, {
-      responseStream: streamOpenAIResponse(
+      responseStream: streamChatModel(provider, {
         systemPrompt,
         messages,
-        resolvedModelId,
+        modelId: resolvedModelId,
         pdfs,
         userAttachments,
-        modelLastMsgText,
+        lastMsgText: modelLastMsgText,
         selectionContext,
         cacheKey,
-        { webSearch, signal: examTurn.signal },
+        tools: { webSearch, signal: examTurn.signal },
         effort,
-      ),
+      }),
       identity,
       turn: examTurn,
       conversationId,
@@ -250,16 +257,17 @@ chat.post(
     const studyCourse =
       courseId && userId ? await courseChatContext(courseId, userId) : null;
 
+    const vectorStoreId = studyCourse?.vectorStoreId ?? null;
     const { modelConfig, modelLogId } = resolveModel(
       modelId,
       requestedEffort,
       userId,
+      !!vectorStoreId,
     );
     const { provider, modelId: resolvedModelId, effort } = modelConfig;
     const webSearch =
       (!!requestedWebSearch || courses.length > 0) &&
       !!modelConfig.supportsWebSearch;
-    const vectorStoreId = studyCourse?.vectorStoreId ?? null;
 
     const courseCode = courses.map((course) => course.code).join(",");
     const lastMsgText = extractTextContent(
@@ -308,18 +316,17 @@ chat.post(
     const learnTurn = startTurn(turnId, turnOwner(identity));
 
     return streamChatResponse(c, {
-      responseStream: streamOpenAIResponse(
+      responseStream: streamChatModel(provider, {
         systemPrompt,
         messages,
-        resolvedModelId,
-        [],
+        modelId: resolvedModelId,
+        pdfs: [],
         userAttachments,
-        modelLastMsgText,
+        lastMsgText: modelLastMsgText,
         selectionContext,
-        undefined,
-        { webSearch, vectorStoreId, signal: learnTurn.signal },
+        tools: { webSearch, vectorStoreId, signal: learnTurn.signal },
         effort,
-      ),
+      }),
       identity,
       turn: learnTurn,
       conversationId,

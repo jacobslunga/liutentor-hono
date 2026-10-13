@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CHAT_MODEL_IDS } from "./chat.models";
+import { CHAT_EFFORTS, CHAT_MODEL_IDS } from "./chat.models";
 
 const messagesSchema = z
   .array(
@@ -33,7 +33,7 @@ export const chatMessageSchema = z.object({
   courseCode: z.string(),
   isFirstMessage: z.boolean().optional(),
   modelId: z.enum(CHAT_MODEL_IDS),
-  effort: z.enum(["low", "high"]).default("low"),
+  effort: z.enum(CHAT_EFFORTS).default("low"),
   conversationId: z.uuid().optional().nullable(),
   selectionContext: z.string().max(2000).optional(),
   webSearch: z.boolean().optional(),
@@ -55,7 +55,7 @@ export const learnMessageSchema = z.object({
   courseId: z.uuid().optional().nullable(),
   isFirstMessage: z.boolean().optional(),
   modelId: z.enum(CHAT_MODEL_IDS),
-  effort: z.enum(["low", "high"]).default("low"),
+  effort: z.enum(CHAT_EFFORTS).default("low"),
   conversationId: z.uuid().optional().nullable(),
   selectionContext: z.string().max(2000).optional(),
   webSearch: z.boolean().optional(),
