@@ -14,6 +14,7 @@ import {
 import {
   buildAnthropicMessages,
   buildGeminiContents,
+  streamChatModel,
 } from "../src/utils/chat.providers";
 import {
   buildOpenAIInput,
@@ -21,6 +22,48 @@ import {
   streamOpenAIResponse,
   type PdfData,
 } from "../src/utils/chat.utils";
+
+describe("chat progress", () => {
+  it("announces response preparation before contacting each provider", async () => {
+    for (const modelId of CHAT_MODEL_IDS) {
+      const { provider } = getModelConfig(modelId);
+      const stream = streamChatModel(provider, {
+        systemPrompt: "Tutor",
+        messages: [{ role: "user", content: "Help" }],
+        lastMsgText: "Help",
+        modelId,
+        pdfs: [],
+        userAttachments: [],
+        effort: "low",
+      });
+      expect(await stream.next()).toEqual({
+        done: false,
+        value: {
+          type: "status",
+          step: "generating",
+          message: "Förbereder svaret",
+        },
+      });
+      await stream.return();
+    }
+  });
+
+  it("does not emit progress or contact a provider for an aborted turn", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const stream = streamChatModel("openai", {
+      systemPrompt: "Tutor",
+      messages: [],
+      lastMsgText: "Help",
+      modelId: LUNA_CHAT_MODEL_ID,
+      pdfs: [],
+      userAttachments: [],
+      effort: "low",
+      tools: { signal: controller.signal },
+    });
+    await expect(stream.next()).rejects.toThrow();
+  });
+});
 
 describe("chat model routing", () => {
   it("routes each model to its provider and keeps the requested effort", () => {
@@ -144,7 +187,12 @@ describe("provider request building", () => {
       lastMsgText: "Ny fråga",
     });
 
-    expect(result.map((c) => c.role)).toEqual(["user", "user", "model", "user"]);
+    expect(result.map((c) => c.role)).toEqual([
+      "user",
+      "user",
+      "model",
+      "user",
+    ]);
     expect(result[0]!.parts![1]).toEqual({
       inlineData: { mimeType: "application/pdf", data: "exam-data" },
     });
@@ -216,7 +264,11 @@ describe("OpenAI chat streaming", () => {
   });
 
   it("preserves the student's question without a language-bearing wrapper", () => {
-    for (const question of ["Explain eigenvalues", "Förklara egenvärden", "5"]) {
+    for (const question of [
+      "Explain eigenvalues",
+      "Förklara egenvärden",
+      "5",
+    ]) {
       expect(buildOpenAIInput([], [], [], question)).toEqual([
         { role: "user", content: question },
       ]);
@@ -225,7 +277,11 @@ describe("OpenAI chat streaming", () => {
 
   it("keeps selected reference text separate from the actual question", () => {
     const input = buildOpenAIInput(
-      [], [], [], "Why is this true?", "Varje bas har lika många vektorer.",
+      [],
+      [],
+      [],
+      "Why is this true?",
+      "Varje bas har lika många vektorer.",
     );
     const content = (input[0] as any).content as string;
     expect(content).toContain("Varje bas har lika många vektorer.");

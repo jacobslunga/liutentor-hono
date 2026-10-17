@@ -1,5 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { GoogleGenAI, ThinkingLevel, type Content, type Part } from "@google/genai";
+import {
+  GoogleGenAI,
+  ThinkingLevel,
+  type Content,
+  type Part,
+} from "@google/genai";
 import type { ValidatedChatAttachment } from "~/api/v1/chat.attachments";
 import type { Provider, ReasoningEffort } from "~/api/v1/chat.models";
 import {
@@ -39,17 +44,21 @@ const google = new GoogleGenAI({
 });
 
 /** Streams a reply from whichever provider serves the requested model. */
-export function streamChatModel(
+export async function* streamChatModel(
   provider: Provider,
   request: ChatModelRequest,
 ): AsyncGenerator<ChatStreamEvent> {
+  request.tools?.signal?.throwIfAborted();
+  yield { type: "status", step: "generating", message: "Förbereder svaret" };
   switch (provider) {
     case "anthropic":
-      return streamAnthropicResponse(request);
+      yield* streamAnthropicResponse(request);
+      return;
     case "google":
-      return streamGoogleResponse(request);
+      yield* streamGoogleResponse(request);
+      return;
     case "openai":
-      return streamOpenAIResponse(
+      yield* streamOpenAIResponse(
         request.systemPrompt,
         request.messages,
         request.modelId,
@@ -61,6 +70,7 @@ export function streamChatModel(
         request.tools,
         request.effort,
       );
+      return;
   }
 }
 
@@ -78,8 +88,8 @@ export function buildAnthropicMessages({
   const history = toTextHistory(messages);
   while (history[0]?.role === "assistant") history.shift();
 
-  const attachmentBlocks: Anthropic.ContentBlockParam[] = userAttachments.flatMap(
-    (attachment) => [
+  const attachmentBlocks: Anthropic.ContentBlockParam[] =
+    userAttachments.flatMap((attachment) => [
       {
         type: "text" as const,
         text: getUserAttachmentLabelText(attachment.filename),
@@ -102,14 +112,16 @@ export function buildAnthropicMessages({
               data: attachment.data,
             },
           },
-    ],
-  );
+    ]);
 
   const lastTurn: Anthropic.MessageParam = {
     role: "user",
     content: [
       ...attachmentBlocks,
-      { type: "text", text: withSelectionContext(lastMsgText, selectionContext) },
+      {
+        type: "text",
+        text: withSelectionContext(lastMsgText, selectionContext),
+      },
     ],
   };
 
@@ -189,10 +201,15 @@ async function* streamAnthropicResponse(
           }
         } else if (block.type === "web_search_tool_result") {
           searching = false;
-          yield { type: "status", step: "search_done", message: "Läser källor" };
+          yield {
+            type: "status",
+            step: "search_done",
+            message: "Läser källor",
+          };
           // An error comes back as a single object instead of a result list.
           if (Array.isArray(block.content)) {
-            for (const result of block.content) addSource(result.url, result.title);
+            for (const result of block.content)
+              addSource(result.url, result.title);
           }
         }
       } else if (event.type === "content_block_delta") {
@@ -259,12 +276,10 @@ export function buildGeminiContents({
 
   return [
     ...reference,
-    ...history.map(
-      (turn): Content => ({
-        role: turn.role === "assistant" ? "model" : "user",
-        parts: [{ text: turn.content }],
-      }),
-    ),
+    ...history.map((turn): Content => ({
+      role: turn.role === "assistant" ? "model" : "user",
+      parts: [{ text: turn.content }],
+    })),
     { role: "user", parts: lastParts },
   ];
 }

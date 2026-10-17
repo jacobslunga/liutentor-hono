@@ -22,7 +22,11 @@ export interface ChatTools {
 
 export type ChatStreamEvent =
   | { type: "text"; delta: string }
-  | { type: "status"; step: "searching" | "search_done"; message: string }
+  | {
+      type: "status";
+      step: "searching" | "search_done" | "generating";
+      message: string;
+    }
   | { type: "sources"; items: ChatSource[] }
   | { type: "title"; title: string };
 

@@ -19,6 +19,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type { PdfData } from "~/utils/chat.utils";
 import { streamChatModel } from "~/utils/chat.providers";
+import { streamExamChat } from "~/utils/course-exams-chat";
 import {
   LUNA_CHAT_MODEL_ID,
   getModelConfig,
@@ -101,6 +102,7 @@ chat.post(
       examUrl,
       solutionUrl,
       courseCode,
+      courseExams,
       conversationId,
       isFirstMessage,
       modelId,
@@ -144,6 +146,7 @@ chat.post(
       model: modelLogId,
       selection_context: selectionContext || null,
       web_search: webSearch,
+      course_exams_requested: courseExams,
     });
 
     const [examBase64, solutionBase64] = await Promise.all([
@@ -187,33 +190,39 @@ chat.post(
 
     const cacheKey = `${examUrl}:${solutionUrl || ""}`;
     const examTurn = startTurn(turnId, turnOwner(identity));
+    const logFields: Record<string, unknown> = {
+      user_id: userId,
+      conversation_id: conversationId || null,
+      anonymous_user_id: anonymousUserId,
+      course_code: courseCode,
+      exam_id: examId,
+      model: modelLogId,
+      course_exams_requested: courseExams,
+    };
 
     return streamChatResponse(c, {
-      responseStream: streamChatModel(provider, {
-        systemPrompt,
-        messages,
-        modelId: resolvedModelId,
-        pdfs,
-        userAttachments,
-        lastMsgText: modelLastMsgText,
-        selectionContext,
-        cacheKey,
-        tools: { webSearch, signal: examTurn.signal },
-        effort,
-      }),
+      responseStream: streamExamChat(
+        provider,
+        {
+          systemPrompt,
+          messages,
+          modelId: resolvedModelId,
+          pdfs,
+          userAttachments,
+          lastMsgText: modelLastMsgText,
+          selectionContext,
+          cacheKey,
+          tools: { webSearch, signal: examTurn.signal },
+          effort,
+        },
+        { enabled: courseExams, courseCode, logFields },
+      ),
       identity,
       turn: examTurn,
       conversationId,
       titleCourseCode: courseCode,
       lastMsgText,
-      logFields: {
-        user_id: userId,
-        conversation_id: conversationId || null,
-        anonymous_user_id: anonymousUserId,
-        course_code: courseCode,
-        exam_id: examId,
-        model: modelLogId,
-      },
+      logFields,
     });
   },
 );

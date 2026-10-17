@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CHAT_EFFORTS, CHAT_MODEL_IDS } from "./chat.models";
+import { COURSE_CODE_PATTERN } from "~/utils/course-exams";
 
 const messagesSchema = z
   .array(
@@ -26,20 +27,29 @@ const messagesSchema = z
   .min(1, "At least one message is required")
   .max(100, "Too many messages in conversation");
 
-export const chatMessageSchema = z.object({
-  messages: messagesSchema,
-  examUrl: z.url(),
-  solutionUrl: z.url().optional(),
-  courseCode: z.string(),
-  isFirstMessage: z.boolean().optional(),
-  modelId: z.enum(CHAT_MODEL_IDS),
-  effort: z.enum(CHAT_EFFORTS).default("low"),
-  conversationId: z.uuid().optional().nullable(),
-  selectionContext: z.string().max(200_000).optional(),
-  webSearch: z.boolean().optional(),
-  /** Lets the app stop this turn with POST /turns/:turnId/cancel. */
-  turnId: z.uuid().optional(),
-});
+export const chatMessageSchema = z
+  .object({
+    messages: messagesSchema,
+    examUrl: z.url(),
+    solutionUrl: z.url().optional(),
+    courseCode: z.string(),
+    courseExams: z.boolean().default(false),
+    isFirstMessage: z.boolean().optional(),
+    modelId: z.enum(CHAT_MODEL_IDS),
+    effort: z.enum(CHAT_EFFORTS).default("low"),
+    conversationId: z.uuid().optional().nullable(),
+    selectionContext: z.string().max(200_000).optional(),
+    webSearch: z.boolean().optional(),
+    /** Lets the app stop this turn with POST /turns/:turnId/cancel. */
+    turnId: z.uuid().optional(),
+  })
+  .refine(
+    (body) => !body.courseExams || COURSE_CODE_PATTERN.test(body.courseCode),
+    {
+      message: "Invalid course code for exam analysis",
+      path: ["courseCode"],
+    },
+  );
 
 export const learnMessageSchema = z.object({
   messages: messagesSchema,
