@@ -35,7 +35,7 @@ export const chatMessageSchema = z.object({
   modelId: z.enum(CHAT_MODEL_IDS),
   effort: z.enum(CHAT_EFFORTS).default("low"),
   conversationId: z.uuid().optional().nullable(),
-  selectionContext: z.string().max(2000).optional(),
+  selectionContext: z.string().max(200_000).optional(),
   webSearch: z.boolean().optional(),
   /** Lets the app stop this turn with POST /turns/:turnId/cancel. */
   turnId: z.uuid().optional(),
@@ -57,7 +57,7 @@ export const learnMessageSchema = z.object({
   modelId: z.enum(CHAT_MODEL_IDS),
   effort: z.enum(CHAT_EFFORTS).default("low"),
   conversationId: z.uuid().optional().nullable(),
-  selectionContext: z.string().max(2000).optional(),
+  selectionContext: z.string().max(200_000).optional(),
   webSearch: z.boolean().optional(),
   turnId: z.uuid().optional(),
 });

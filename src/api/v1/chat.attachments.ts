@@ -1,6 +1,6 @@
 import { HTTPException } from "hono/http-exception";
 
-export const MAX_CHAT_ATTACHMENTS = 5;
+export const MAX_CHAT_ATTACHMENTS = 20;
 export const MAX_CHAT_ATTACHMENT_SIZE = 5 * 1024 * 1024;
 export const MAX_CHAT_ATTACHMENTS_TOTAL_SIZE = 20 * 1024 * 1024;
 
