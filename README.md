@@ -39,7 +39,7 @@ All paths are prefixed with `/api`.
 | DELETE | `/v1/study-courses/:courseId/files/:fileId` | Delete a course file |
 | DELETE | `/v1/study-courses/:courseId` | Delete a study course and its material |
 
-Chat requests use multipart form data with a JSON `payload` field and optional `files` attachments. Chat accepts PDF, JPEG, PNG, WebP, and GIF attachments, up to five files, 5 MB each, and 20 MB total. Send `Accept: text/event-stream` for chat events; otherwise the response is streamed plain text. Quiz responses use server-sent events.
+Chat requests use multipart form data with a JSON `payload` field and optional `files` attachments. Chat accepts PDF, JPEG, PNG, WebP, and GIF attachments, up to five files, 5 MB each, and 20 MB total. Send `Accept: text/event-stream` for chat events; otherwise the response is streamed plain text. Quiz responses use server-sent events. Quiz generation uses Gemini 3.1 Flash-Lite with medium thinking and the existing `GEMINI_API_KEY`.
 
 Authenticated requests use `Authorization: Bearer <token>`. Anonymous chat and quiz requests can provide `x-anonymous-user-id`. Study-course endpoints and private conversations require authentication, as does the `high` effort level.
 
