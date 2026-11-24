@@ -42,7 +42,7 @@ describe("Gemini quiz generation", () => {
         responseMimeType: "application/json",
       },
     });
-    expect(QUIZ_MODEL).toBe("gemini-3.1-flash-lite");
+    expect(QUIZ_MODEL).toBe("gemini-3.5-flash-lite");
     expect(QUIZ_REASONING_EFFORT).toBe("medium");
     expect(request.config.responseJsonSchema).toBeDefined();
     expect(request.contents[0].parts).toEqual([

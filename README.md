@@ -58,7 +58,7 @@ Prewarm a course before releasing the feature for it (this makes paid model call
 ```sh
 bun run analyse-course-exams TATA41
 # Optional model ID: uses that provider's configured API key.
-bun run analyse-course-exams TATA41 gemini-3.1-flash-lite
+bun run analyse-course-exams TATA41 gemini-3.5-flash-lite
 ```
 
 The command processes all missing exams with two workers, allows 120 seconds per PDF, and exits with status 1 if any remain unanalysed. Re-running resumes from successful cache entries, respecting the 15-minute failure backoff. No new environment variables are required. Run it again after new exams are imported; the chat can also incrementally fill the cache on opted-in messages.

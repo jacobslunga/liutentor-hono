@@ -28,7 +28,7 @@ import { fetchPdfAsBase64 } from "~/utils/pdf";
 import { getAuthenticatedUserId } from "~/utils/auth";
 import { GoogleGenAI, ThinkingLevel, type Part } from "@google/genai";
 
-export const QUIZ_MODEL = "gemini-3.1-flash-lite";
+export const QUIZ_MODEL = "gemini-3.5-flash-lite";
 export const QUIZ_REASONING_EFFORT = "medium" as const;
 
 const google = new GoogleGenAI({

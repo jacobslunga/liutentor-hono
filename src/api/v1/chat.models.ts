@@ -13,12 +13,15 @@ export interface ModelConfig {
 
 export const LUNA_CHAT_MODEL_ID = "gpt-6-luna";
 export const HAIKU_CHAT_MODEL_ID = "claude-haiku-5-5";
-export const GEMINI_CHAT_MODEL_ID = "gemini-3.1-flash-lite";
+export const GEMINI_CHAT_MODEL_ID = "gemini-3.5-flash-lite";
+// Accept the model ID sent by existing frontend deployments.
+const LEGACY_GEMINI_CHAT_MODEL_ID = "gemini-3.1-flash-lite";
 
 export const CHAT_MODEL_IDS = [
   HAIKU_CHAT_MODEL_ID,
   LUNA_CHAT_MODEL_ID,
   GEMINI_CHAT_MODEL_ID,
+  LEGACY_GEMINI_CHAT_MODEL_ID,
 ] as const;
 export type ChatModelId = (typeof CHAT_MODEL_IDS)[number];
 
@@ -26,6 +29,7 @@ const MODEL_PROVIDERS = {
   [HAIKU_CHAT_MODEL_ID]: "anthropic",
   [LUNA_CHAT_MODEL_ID]: "openai",
   [GEMINI_CHAT_MODEL_ID]: "google",
+  [LEGACY_GEMINI_CHAT_MODEL_ID]: "google",
 } satisfies Record<ChatModelId, Provider>;
 
 export function getModelConfig(
@@ -36,7 +40,8 @@ export function getModelConfig(
   if (!provider) throw new Error("Unsupported chat model");
   return {
     provider,
-    modelId,
+    modelId:
+      modelId === LEGACY_GEMINI_CHAT_MODEL_ID ? GEMINI_CHAT_MODEL_ID : modelId,
     effort,
     // Only the deepest reasoning level is reserved for signed-in users.
     ...(effort === "high" ? { requiresAuth: true } : {}),
